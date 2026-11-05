@@ -1,0 +1,2750 @@
+#define name NextDNS Manager
+#define color blue
+#define version 18.4
+
+#include 'actions/web'
+#include 'actions/device'
+#include 'actions/text'
+#include 'actions/documents'
+
+@apiKey = "PASTE_API_KEY_HERE"
+@profileId = "PASTE_PROFILE_ID_HERE"
+
+// settings are saved in iCloud Drive/Shortcuts/NextDNS Manager/config.json
+@configPath = "NextDNS Manager/config.json"
+@prefsSuccess = 0
+@prefsWaitSeconds = 5
+@prefsCellular = 0
+@prefsSideload = 1
+@prefsApp = 0
+@prefsDirty = 0
+
+// find the existing settings file before creating the default one
+@configJson = '{"configVersion":1,"successConfirmations":false,"networkRefreshInterval":5,"enableCellularAfterRefresh":false,"sideloadingFeatures":true,"showNextDNSApp":false}'
+@configDict = getDictionary(@configJson)
+@configFileFound = 0
+@configFolder = createFolder("NextDNS Manager")
+@configFolderContents = getFolderContents(@configFolder)
+@configFolderItemCount = count(@configFolderContents)
+repeat configFileIndex for @configFolderItemCount {
+    @configFolderItem = getListItem(@configFolderContents, @configFileIndex)
+    @configFolderItemNameRaw = getFileDetail(@configFolderItem, "Name")
+    @configFolderItemName = "{@configFolderItemNameRaw}"
+    if @configFolderItemName == "config.json" {
+        @configFileFound = 1
+        @configDict = getDictionary(@configFolderItem)
+    }
+}
+if @configFileFound == 0 {
+    // Create defaults only on the first run.
+    saveFile(@configPath, @configJson, true)
+}
+
+// Leave invalid settings files untouched.
+@configKeys = getKeys(@configDict)
+@configKeysText = "{@configKeys}"
+@configOK = 1
+if @configKeysText contains "configVersion" {
+    @cfgVerRaw = getValue(@configDict, "configVersion")
+    @cfgVerText = "{@cfgVerRaw}"
+    if @cfgVerText != "1" {
+        @configOK = 0
+    }
+} else {
+    @configOK = 0
+}
+if @configKeysText contains "successConfirmations" {
+    @cfgSuccessRaw = getValue(@configDict, "successConfirmations")
+    @cfgSuccessText = "{@cfgSuccessRaw}"
+    if @cfgSuccessText == "true" || @cfgSuccessText == "True" || @cfgSuccessText == "Yes" || @cfgSuccessText == "1" {
+        @prefsSuccess = 1
+    } else {
+        if @cfgSuccessText != "false" && @cfgSuccessText != "False" && @cfgSuccessText != "No" && @cfgSuccessText != "0" {
+            @configOK = 0
+        }
+    }
+} else {
+    @configOK = 0
+}
+if @configKeysText contains "enableCellularAfterRefresh" {
+    @cfgCellularRaw = getValue(@configDict, "enableCellularAfterRefresh")
+    @cfgCellularText = "{@cfgCellularRaw}"
+    if @cfgCellularText == "true" || @cfgCellularText == "True" || @cfgCellularText == "Yes" || @cfgCellularText == "1" {
+        @prefsCellular = 1
+    } else {
+        if @cfgCellularText != "false" && @cfgCellularText != "False" && @cfgCellularText != "No" && @cfgCellularText != "0" {
+            @configOK = 0
+        }
+    }
+} else {
+    @configOK = 0
+}
+if @configKeysText contains "sideloadingFeatures" {
+    @cfgSideloadRaw = getValue(@configDict, "sideloadingFeatures")
+    @cfgSideloadText = "{@cfgSideloadRaw}"
+    if @cfgSideloadText == "true" || @cfgSideloadText == "True" || @cfgSideloadText == "Yes" || @cfgSideloadText == "1" {
+        @prefsSideload = 1
+    } else {
+        if @cfgSideloadText != "false" && @cfgSideloadText != "False" && @cfgSideloadText != "No" && @cfgSideloadText != "0" {
+            @configOK = 0
+        }
+    }
+} else {
+    @configOK = 0
+}
+if @configKeysText contains "showNextDNSApp" {
+    @cfgAppRaw = getValue(@configDict, "showNextDNSApp")
+    @cfgAppText = "{@cfgAppRaw}"
+    if @cfgAppText == "true" || @cfgAppText == "True" || @cfgAppText == "Yes" || @cfgAppText == "1" {
+        @prefsApp = 1
+    } else {
+        if @cfgAppText != "false" && @cfgAppText != "False" && @cfgAppText != "No" && @cfgAppText != "0" {
+            @configOK = 0
+        }
+    }
+} else {
+    @configOK = 0
+}
+if @configKeysText contains "networkRefreshInterval" {
+    @cfgWaitRaw = getValue(@configDict, "networkRefreshInterval")
+    @cfgWaitText = "{@cfgWaitRaw}"
+    @cfgWaitMatches = matchText('^[0-9]+$', @cfgWaitText)
+    @cfgWaitMatchCount = count(@cfgWaitMatches)
+    if @cfgWaitMatchCount == 0 {
+        @configOK = 0
+    } else {
+        @prefsWaitSeconds = number(@cfgWaitText)
+        if @prefsWaitSeconds < 2 || @prefsWaitSeconds > 30 {
+            @configOK = 0
+        }
+    }
+} else {
+    @configOK = 0
+}
+if @configOK == 0 {
+    show("Invalid Preferences File\n\nThe existing config.json is invalid. \nDelete the file and run this shortcut again.\n\nConfig Location: \n'Files > iCloud Drive > Shortcuts > NextDNS Manager > config.json'")
+    stop()
+}
+
+@setupErrors = 0
+if @apiKey == "" {
+    @setupErrors += 1
+}
+if @apiKey == "PASTE_API_KEY_HERE" {
+    @setupErrors += 1
+}
+if @profileId == "" {
+    @setupErrors += 1
+}
+if @profileId == "PASTE_PROFILE_ID_HERE" {
+    @setupErrors += 1
+}
+
+if @setupErrors > 0 {
+    show("Connect your NextDNS account to this shortcut\n\n1. Create or sign into your NextDNS account on their website\n\n2. Go to 'Account' page,  scroll down and copy your API key\n\n3. Open the actions of this shortcut and replace PASTE_API_KEY_HERE with your API key\n\n4. Copy your Profile ID from NextDNS website on the 'Setup' tab under 'Endpoints'  it's 6 characters long and should look something like 'de6b41'\n\n5. Replace PASTE_PROFILE_ID_HERE with that Profile ID\n\n6. Run this shortcut again\n\nDO NOT share your install of this shortcut after you've done this, or others will receive your API key with it. \n\nIf you haven't yet installed your NextDNS profile to this apple device, read the instructions in this shortcut at 'Info > How to Setup > Installing NextDNS Profile'")
+    stop()
+} else {
+    @denyEndpoint = "https://api.nextdns.io/profiles/{@profileId}/denylist"
+    @allowEndpoint = "https://api.nextdns.io/profiles/{@profileId}/allowlist"
+    @privacyEndpoint = "https://api.nextdns.io/profiles/{@profileId}/privacy/blocklists"
+    @analyticsEndpoint = "https://api.nextdns.io/profiles/{@profileId}/analytics/status"
+    @denyReadEndpoint = "{@denyEndpoint}"
+    @allowReadEndpoint = "{@allowEndpoint}"
+    @privacyReadEndpoint = "{@privacyEndpoint}"
+    @required = ["ppq.apple.com", "ocsp2.apple.com", "vpp.itunes.apple.com", "valid.apple.com", "ocsp.apple.com", "crl.apple.com", "certs.apple.com", "appattest.apple.com"]
+    @page = "main"
+    @needsReload = 1
+    @intent = ""
+    @targetEndpoint = "{@denyEndpoint}"
+    @listName = "denylist"
+    @targetDomains = []
+    @expectedActive = "Yes"
+    @confirmText = ""
+    @confirmLabel = "Continue"
+    @confirmParent = "main"
+    @noticeText = ""
+    @noticeTitle = ""
+    @noticeParent = "main"
+    @noticeIsAction = 0
+    @successTitle = "Changes Completed"
+    @successMessage = ""
+    @successParent = "main"
+
+    // track the current screen in @page
+    repeat mainCycle for 80 {
+        // save preference changes before opening the next screen
+        if @prefsDirty == 1 {
+            @cfgSuccessJSON = "false"
+            @cfgCellularJSON = "false"
+            @cfgSideloadJSON = "false"
+            @cfgAppJSON = "false"
+            if @prefsSuccess == 1 {
+                @cfgSuccessJSON = "true"
+            }
+            if @prefsCellular == 1 {
+                @cfgCellularJSON = "true"
+            }
+            if @prefsSideload == 1 {
+                @cfgSideloadJSON = "true"
+            }
+            if @prefsApp == 1 {
+                @cfgAppJSON = "true"
+            }
+            @configJson = '{"configVersion":1,"successConfirmations":'
+            @configJson += "{@cfgSuccessJSON}"
+            @configJson += ',"networkRefreshInterval":'
+            @configJson += "{@prefsWaitSeconds}"
+            @configJson += ',"enableCellularAfterRefresh":'
+            @configJson += "{@cfgCellularJSON}"
+            @configJson += ',"sideloadingFeatures":'
+            @configJson += "{@cfgSideloadJSON}"
+            @configJson += ',"showNextDNSApp":'
+            @configJson += "{@cfgAppJSON}"
+            @configJson += '}'
+            saveFile(@configPath, @configJson, true)
+            @prefsDirty = 0
+        }
+
+        if @needsReload == 1 {
+            @denyRecords = []
+            @allowRecords = []
+            @privacyRecords = []
+            @denyOK = 1
+            @allowOK = 1
+            @privacyOK = 1
+            @denyProblem = "Missing a valid data array in the API response."
+            @allowProblem = "Missing a valid data array in the API response."
+            @privacyProblem = "Missing a valid data array in the API response."
+            @denyUnreadable = 0
+            @allowUnreadable = 0
+            @privacyUnreadable = 0
+            // The full-profile response provides the main-menu stats in one request.
+            @profileName = "{@profileId}"
+            @profileOK = 0
+            @profileReadURL = "https://api.nextdns.io/profiles/{@profileId}"
+            @profileReadResponse = downloadURL(@profileReadURL, {"X-Api-Key": "{@apiKey}"})
+            @profileReadDict = getDictionary(@profileReadResponse)
+            @profileReadKeys = getKeys(@profileReadDict)
+            @profileReadKeysText = "{@profileReadKeys}"
+            @profileDataKeysText = ""
+            if @profileReadKeysText contains "data" {
+                @profileData = getValue(@profileReadDict, "data")
+                @profileDataDict = getDictionary(@profileData)
+                @profileDataKeys = getKeys(@profileDataDict)
+                @profileDataKeysText = "{@profileDataKeys}"
+                @profileOK = 1
+                if @profileDataKeysText contains "name" {
+                    @profileNameRaw = getValue(@profileDataDict, "name")
+                    @profileNameText = "{@profileNameRaw}"
+                    if @profileNameText != "" {
+                        @profileName = "{@profileNameText}"
+                    }
+                }
+            }
+
+            // fetch individual collections only when the profile response is incomplete
+            @denyFromProfile = 0
+            @allowFromProfile = 0
+            @privacyFromProfile = 0
+            if @profileOK == 1 {
+                if @profileDataKeysText contains "denylist" {
+                    @denyRecords = getValue(@profileDataDict, "denylist")
+                    @denyFromProfile = 1
+                }
+                if @profileDataKeysText contains "allowlist" {
+                    @allowRecords = getValue(@profileDataDict, "allowlist")
+                    @allowFromProfile = 1
+                }
+                if @profileDataKeysText contains "privacy" {
+                    @fullPrivacy = getValue(@profileDataDict, "privacy")
+                    @fullPrivacyDict = getDictionary(@fullPrivacy)
+                    @fullPrivacyKeys = getKeys(@fullPrivacyDict)
+                    @fullPrivacyKeysText = "{@fullPrivacyKeys}"
+                    if @fullPrivacyKeysText contains "blocklists" {
+                        @privacyRecords = getValue(@fullPrivacyDict, "blocklists")
+                        @privacyFromProfile = 1
+                    }
+                }
+            }
+
+            if @denyFromProfile == 0 {
+                @denyResponse = downloadURL(@denyReadEndpoint, {"X-Api-Key": "{@apiKey}"})
+                @denyDict = getDictionary(@denyResponse)
+                @denyKeys = getKeys(@denyDict)
+                @denyKeysText = "{@denyKeys}"
+                if @denyKeysText contains "data" {
+                    @denyRecords = getValue(@denyDict, "data")
+                } else {
+                    @denyOK = 0
+                    if @denyKeysText contains "errors" {
+                        @denyProblem = "NextDNS returned an API error instead of profile data."
+                    }
+                }
+                // reject paginated results to avoid reporting partial counts
+                if @denyKeysText contains "meta" {
+                    @denyMeta = getValue(@denyDict, "meta")
+                    @denyMetaDict = getDictionary(@denyMeta)
+                    @denyMetaKeys = getKeys(@denyMetaDict)
+                    @denyMetaKeysText = "{@denyMetaKeys}"
+                    if @denyMetaKeysText contains "pagination" {
+                        @denyPages = getValue(@denyMetaDict, "pagination")
+                        @denyPagesDict = getDictionary(@denyPages)
+                        @denyCursor = getValue(@denyPagesDict, "cursor")
+                        @denyCursorText = "{@denyCursor}"
+                        if @denyCursorText != "" && @denyCursorText != "null" && @denyCursorText != "None" && @denyCursorText != "Nothing" && @denyCursorText != "nil" {
+                            @denyOK = 0
+                        }
+                    }
+                }
+            }
+            if @allowFromProfile == 0 {
+                @allowResponse = downloadURL(@allowReadEndpoint, {"X-Api-Key": "{@apiKey}"})
+                @allowDict = getDictionary(@allowResponse)
+                @allowKeys = getKeys(@allowDict)
+                @allowKeysText = "{@allowKeys}"
+                if @allowKeysText contains "data" {
+                    @allowRecords = getValue(@allowDict, "data")
+                } else {
+                    @allowOK = 0
+                    if @allowKeysText contains "errors" {
+                        @allowProblem = "NextDNS returned an API error instead of profile data."
+                    }
+                }
+                if @allowKeysText contains "meta" {
+                    @allowMeta = getValue(@allowDict, "meta")
+                    @allowMetaDict = getDictionary(@allowMeta)
+                    @allowMetaKeys = getKeys(@allowMetaDict)
+                    @allowMetaKeysText = "{@allowMetaKeys}"
+                    if @allowMetaKeysText contains "pagination" {
+                        @allowPages = getValue(@allowMetaDict, "pagination")
+                        @allowPagesDict = getDictionary(@allowPages)
+                        @allowCursor = getValue(@allowPagesDict, "cursor")
+                        @allowCursorText = "{@allowCursor}"
+                        if @allowCursorText != "" && @allowCursorText != "null" && @allowCursorText != "None" && @allowCursorText != "Nothing" && @allowCursorText != "nil" {
+                            @allowOK = 0
+                        }
+                    }
+                }
+            }
+            if @privacyFromProfile == 0 {
+                @privacyResponse = downloadURL(@privacyReadEndpoint, {"X-Api-Key": "{@apiKey}"})
+                @privacyDict = getDictionary(@privacyResponse)
+                @privacyKeys = getKeys(@privacyDict)
+                @privacyKeysText = "{@privacyKeys}"
+                if @privacyKeysText contains "data" {
+                    @privacyRecords = getValue(@privacyDict, "data")
+                } else {
+                    @privacyOK = 0
+                    if @privacyKeysText contains "errors" {
+                        @privacyProblem = "NextDNS returned an API error instead of profile data."
+                    }
+                }
+                if @privacyKeysText contains "meta" {
+                    @privacyMeta = getValue(@privacyDict, "meta")
+                    @privacyMetaDict = getDictionary(@privacyMeta)
+                    @privacyMetaKeys = getKeys(@privacyMetaDict)
+                    @privacyMetaKeysText = "{@privacyMetaKeys}"
+                    if @privacyMetaKeysText contains "pagination" {
+                        @privacyPages = getValue(@privacyMetaDict, "pagination")
+                        @privacyPagesDict = getDictionary(@privacyPages)
+                        @privacyCursor = getValue(@privacyPagesDict, "cursor")
+                        @privacyCursorText = "{@privacyCursor}"
+                        if @privacyCursorText != "" && @privacyCursorText != "null" && @privacyCursorText != "None" && @privacyCursorText != "Nothing" && @privacyCursorText != "nil" {
+                            @privacyOK = 0
+                        }
+                    }
+                }
+            }
+            @denyCount = count(@denyRecords)
+            @allowCount = count(@allowRecords)
+            @privacyCount = count(@privacyRecords)
+            @denyEnabled = 0
+            @allowEnabled = 0
+            @denyStatus = ""
+            @allowStatus = ""
+            @privacyStatus = ""
+            @presentSideload = []
+            @missingSideload = []
+            @sideloadStatus = ""
+            @sideloadEnabled = 0
+            @ppqStatus = "Not added"
+            @ppqFound = 0
+            @ppqBlocked = 0
+            // if a sideloading rule appears more than once, an active entry takes priority
+            @sideloadPPQ = "NOT ADDED"
+            @sideloadOCSP2 = "NOT ADDED"
+            @sideloadVPP = "NOT ADDED"
+            @sideloadVALID = "NOT ADDED"
+            @sideloadOCSP = "NOT ADDED"
+            @sideloadCRL = "NOT ADDED"
+            @sideloadCERTS = "NOT ADDED"
+            @sideloadAPPATTEST = "NOT ADDED"
+            // treat missing rule fields as errors before allowing edits
+            repeat denyRowIndex for @denyCount {
+                @ruleRepeatItem1 = getListItem(@denyRecords, @denyRowIndex)
+                @ruleDict = getDictionary(@ruleRepeatItem1)
+                @id = getValue(@ruleDict, "id")
+                @domain = "{@id}"
+                @active = getValue(@ruleDict, "active")
+                @activeText = "{@active}"
+                @isActive = 0
+                if @activeText == "Yes" || @activeText == "true" || @activeText == "True" || @activeText == "1" {
+                    @isActive = 1
+                }
+                @recordReadable = 0
+                if @activeText == "Yes" || @activeText == "No" || @activeText == "true" || @activeText == "True" || @activeText == "false" || @activeText == "False" || @activeText == "1" || @activeText == "0" {
+                    @recordReadable = 1
+                }
+                if @domain == "" {
+                    @recordReadable = 0
+                }
+                if @recordReadable == 0 {
+                    @denyOK = 0
+                    @denyUnreadable += 1
+                } else {
+                    if @isActive == 1 {
+                        @denyEnabled += 1
+                    } else {
+                    }
+                    // Count enabled rules and sideloading states in the same pass.
+                    if @domain == "ppq.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadPPQ = "ON"
+                        } else {
+                            if @sideloadPPQ != "ON" {
+                                @sideloadPPQ = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "ocsp2.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadOCSP2 = "ON"
+                        } else {
+                            if @sideloadOCSP2 != "ON" {
+                                @sideloadOCSP2 = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "vpp.itunes.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadVPP = "ON"
+                        } else {
+                            if @sideloadVPP != "ON" {
+                                @sideloadVPP = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "valid.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadVALID = "ON"
+                        } else {
+                            if @sideloadVALID != "ON" {
+                                @sideloadVALID = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "ocsp.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadOCSP = "ON"
+                        } else {
+                            if @sideloadOCSP != "ON" {
+                                @sideloadOCSP = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "crl.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadCRL = "ON"
+                        } else {
+                            if @sideloadCRL != "ON" {
+                                @sideloadCRL = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "certs.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadCERTS = "ON"
+                        } else {
+                            if @sideloadCERTS != "ON" {
+                                @sideloadCERTS = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "appattest.apple.com" {
+                        if @isActive == 1 {
+                            @sideloadAPPATTEST = "ON"
+                        } else {
+                            if @sideloadAPPATTEST != "ON" {
+                                @sideloadAPPATTEST = "OFF"
+                            }
+                        }
+                    }
+                    if @domain == "ppq.apple.com" {
+                        @ppqFound = 1
+                        @ppqStatus = "Off (unblocked)"
+                        if @isActive == 1 {
+                            @ppqStatus = "On (blocked)"
+                            @ppqBlocked = 1
+                        }
+                    }
+                }
+            }
+            if @denyUnreadable > 0 {
+                @firstDeny = getFirstItem(@denyRecords)
+                @firstDenyType = typeOf(@firstDeny)
+                @firstDenyDict = getDictionary(@firstDeny)
+                @firstDenyKeys = getKeys(@firstDenyDict)
+                @denyProblem = "{@denyCount} entries returned; {@denyUnreadable} unreadable. First entry type: {@firstDenyType}. Fields: {@firstDenyKeys}."
+            }
+            repeat allowRowIndex for @allowCount {
+                @ruleRepeatItem2 = getListItem(@allowRecords, @allowRowIndex)
+                @ruleDict = getDictionary(@ruleRepeatItem2)
+                @id = getValue(@ruleDict, "id")
+                @domain = "{@id}"
+                @active = getValue(@ruleDict, "active")
+                @activeText = "{@active}"
+                @isActive = 0
+                if @activeText == "Yes" || @activeText == "true" || @activeText == "True" || @activeText == "1" {
+                    @isActive = 1
+                }
+                @recordReadable = 0
+                if @activeText == "Yes" || @activeText == "No" || @activeText == "true" || @activeText == "True" || @activeText == "false" || @activeText == "False" || @activeText == "1" || @activeText == "0" {
+                    @recordReadable = 1
+                }
+                if @domain == "" {
+                    @recordReadable = 0
+                }
+                if @recordReadable == 0 {
+                    @allowOK = 0
+                    @allowUnreadable += 1
+                } else {
+                    if @isActive == 1 {
+                        @allowEnabled += 1
+                    } else {
+                    }
+                }
+            }
+            if @allowUnreadable > 0 {
+                @firstAllow = getFirstItem(@allowRecords)
+                @firstAllowType = typeOf(@firstAllow)
+                @firstAllowDict = getDictionary(@firstAllow)
+                @firstAllowKeys = getKeys(@firstAllowDict)
+                @allowProblem = "{@allowCount} entries returned; {@allowUnreadable} unreadable. First entry type: {@firstAllowType}. Fields: {@firstAllowKeys}."
+            }
+            repeat privacyRowIndex for @privacyCount {
+                @ruleRepeatItem3 = getListItem(@privacyRecords, @privacyRowIndex)
+                @ruleDict = getDictionary(@ruleRepeatItem3)
+                @id = getValue(@ruleDict, "id")
+                @domain = "{@id}"
+                @ruleKeys = getKeys(@ruleDict)
+                @ruleKeysText = "{@ruleKeys}"
+                if @ruleKeysText contains "name" {
+                    @friendly = getValue(@ruleDict, "name")
+                    @friendlyText = "{@friendly}"
+                    if @friendlyText != "" {
+                        @domain = "{@friendlyText}"
+                    }
+                }
+                if @domain == "" {
+                    @privacyOK = 0
+                    @privacyUnreadable += 1
+                } else {
+                }
+            }
+            if @privacyUnreadable > 0 {
+                @firstPrivacy = getFirstItem(@privacyRecords)
+                @firstPrivacyType = typeOf(@firstPrivacy)
+                @firstPrivacyDict = getDictionary(@firstPrivacy)
+                @firstPrivacyKeys = getKeys(@firstPrivacyDict)
+                @privacyProblem = "{@privacyCount} entries returned; {@privacyUnreadable} unreadable. First entry type: {@firstPrivacyType}. Fields: {@firstPrivacyKeys}."
+            }
+            @requiredCount = count(@required)
+            repeat requiredRowIndex for @requiredCount {
+                @requiredItem = getListItem(@required, @requiredRowIndex)
+                @requested = "{@requiredItem}"
+                @requiredState = "NOT ADDED"
+                if @requested == "ppq.apple.com" {
+                    @requiredState = "{@sideloadPPQ}"
+                }
+                if @requested == "ocsp2.apple.com" {
+                    @requiredState = "{@sideloadOCSP2}"
+                }
+                if @requested == "vpp.itunes.apple.com" {
+                    @requiredState = "{@sideloadVPP}"
+                }
+                if @requested == "valid.apple.com" {
+                    @requiredState = "{@sideloadVALID}"
+                }
+                if @requested == "ocsp.apple.com" {
+                    @requiredState = "{@sideloadOCSP}"
+                }
+                if @requested == "crl.apple.com" {
+                    @requiredState = "{@sideloadCRL}"
+                }
+                if @requested == "certs.apple.com" {
+                    @requiredState = "{@sideloadCERTS}"
+                }
+                if @requested == "appattest.apple.com" {
+                    @requiredState = "{@sideloadAPPATTEST}"
+                }
+                if @requiredState == "NOT ADDED" {
+                    @missingSideload += @requested
+                } else {
+                    @presentSideload += @requested
+                    if @requiredState == "ON" {
+                        @sideloadEnabled += 1
+                    }
+                }
+            }
+            @sideloadCount = count(@presentSideload)
+            @missingCount = count(@missingSideload)
+
+            @privacyEnabled = @privacyCount
+            @denySummary = "{@denyEnabled}/{@denyCount}"
+            @allowSummary = "{@allowEnabled}/{@allowCount}"
+            @privacySummary = "{@privacyEnabled}"
+            @ppqMainStatus = "Not added"
+            if @ppqFound == 1 {
+                @ppqMainStatus = "Off"
+                if @ppqBlocked == 1 {
+                    @ppqMainStatus = "On"
+                }
+            }
+            if @denyOK == 0 {
+                @denySummary = "Unavailable"
+            }
+            if @allowOK == 0 {
+                @allowSummary = "Unavailable"
+            }
+            if @privacyOK == 0 {
+                @privacySummary = "Unavailable"
+            }
+            // build detailed status text only when its screen is opened.
+            @privacyProtectionsOK = 0
+            @securityProtectionsOK = 0
+            @privacyProtectionsEnabled = 0
+            @securityProtectionsEnabled = 0
+            @privacyProtectionsSummary = "Unavailable"
+            @securityProtectionsSummary = "Unavailable"
+            if @profileOK == 1 {
+                if @profileDataKeysText contains "privacy" {
+                    @profilePrivacyRaw = getValue(@profileDataDict, "privacy")
+                    @profilePrivacyDict = getDictionary(@profilePrivacyRaw)
+                    @profilePrivacyKeys = getKeys(@profilePrivacyDict)
+                    @privacyProtectionsOK = 1
+                    @profilePrivacyKeyCount = count(@profilePrivacyKeys)
+                    repeat privacyOptionIndex for @profilePrivacyKeyCount {
+                        @privacyKeyRaw = getListItem(@profilePrivacyKeys, @privacyOptionIndex)
+                        @privacyKey = "{@privacyKeyRaw}"
+                        if @privacyKey == "natives" {
+                            @nativeEntries = getValue(@profilePrivacyDict, "natives")
+                            @nativeEntryCount = count(@nativeEntries)
+                            repeat nativeEntryIndex for @nativeEntryCount {
+                                @nativeItem = getListItem(@nativeEntries, @nativeEntryIndex)
+                                @nativeDict = getDictionary(@nativeItem)
+                                @nativeIdRaw = getValue(@nativeDict, "id")
+                                @nativeId = "{@nativeIdRaw}"
+                                @nativeOn = 1
+                                @nativeKeys = getKeys(@nativeDict)
+                                @nativeKeysText = "{@nativeKeys}"
+                                if @nativeKeysText contains "active" {
+                                    @nativeActiveRaw = getValue(@nativeDict, "active")
+                                    @nativeActiveText = "{@nativeActiveRaw}"
+                                    if @nativeActiveText == "No" || @nativeActiveText == "false" || @nativeActiveText == "False" || @nativeActiveText == "0" {
+                                        @nativeOn = 0
+                                    }
+                                }
+                                if @nativeId == "" {
+                                    @privacyProtectionsOK = 0
+                                } else {
+                                    if @nativeOn == 1 {
+                                        @privacyProtectionsEnabled += 1
+                                    }
+                                }
+                            }
+                        } else {
+                            if @privacyKey != "blocklists" {
+                                @privacyValueRaw = getValue(@profilePrivacyDict, @privacyKey)
+                                @privacyValueText = "{@privacyValueRaw}"
+                                if @privacyValueText == "Yes" || @privacyValueText == "true" || @privacyValueText == "True" || @privacyValueText == "1" {
+                                    @privacyProtectionsEnabled += 1
+                                }
+                            }
+                        }
+                    }
+                    if @privacyProtectionsOK == 1 {
+                        @privacyProtectionsSummary = "{@privacyProtectionsEnabled}"
+                    }
+                }
+                if @profileDataKeysText contains "security" {
+                    @profileSecurityRaw = getValue(@profileDataDict, "security")
+                    @profileSecurityDict = getDictionary(@profileSecurityRaw)
+                    @profileSecurityKeys = getKeys(@profileSecurityDict)
+                    @securityProtectionsOK = 1
+                    @profileSecurityKeyCount = count(@profileSecurityKeys)
+                    repeat securityOptionIndex for @profileSecurityKeyCount {
+                        @securityKeyRaw = getListItem(@profileSecurityKeys, @securityOptionIndex)
+                        @securityKey = "{@securityKeyRaw}"
+                        if @securityKey == "tlds" {
+                            @securityTLDEntries = getValue(@profileSecurityDict, "tlds")
+                            @securityTLDCount = count(@securityTLDEntries)
+                            if @securityTLDCount > 0 {
+                                @securityProtectionsEnabled += 1
+                            }
+                        } else {
+                            if @securityKey != "idnHomographs" && @securityKey != "typosquatting" {
+                                @securityValueRaw = getValue(@profileSecurityDict, @securityKey)
+                                @securityValueText = "{@securityValueRaw}"
+                                if @securityValueText == "Yes" || @securityValueText == "true" || @securityValueText == "True" || @securityValueText == "1" {
+                                    @securityProtectionsEnabled += 1
+                                }
+                            }
+                        }
+                    }
+                    if @securityProtectionsOK == 1 {
+                        @securityProtectionsSummary = "{@securityProtectionsEnabled}"
+                    }
+                }
+            }
+            @needsReload = 0
+        }
+
+        if @page == "main" {
+            @noticeIsAction = 0
+            if @denyOK == 0 || @allowOK == 0 || @privacyOK == 0 {
+                show("NextDNS Data Unavailable\n\nFailed to verify the\nNextDNS profile data.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. ")
+                stop()
+            } else {
+                @mainHeading = "NextDNS Management\nProfile: {@profileName}\n\n"
+                if @prefsSideload == 1 {
+                    @mainHeading += "PPQ: {@ppqMainStatus}\n"
+                }
+                @mainHeading += "Enabled Denylist Rules: {@denySummary}\nEnabled Allowlist Rules: {@allowSummary}\nEnabled Privacy Blocklists: {@privacySummary}\nEnabled Privacy Protections: {@privacyProtectionsSummary}\nEnabled Security Protections: {@securityProtectionsSummary}"
+                if @prefsSideload == 1 {
+                    if @prefsApp == 1 {
+                        menu @mainHeading {
+                            item "Check Status":
+                                @page = "status"
+                            item "Swap PPQ Blocking On/Off":
+                                @page = "ppq"
+                            item "Add/Remove Sideload Ruleset":
+                                @page = "sideload"
+                            item "Add/Remove Custom DNS Rules":
+                                @page = "custom"
+                            item "Refresh Network Connection":
+                                @page = "refresh"
+                            item "Open NextDNS Website":
+                                openURL("https://my.nextdns.io")
+                                stop()
+                            item "Open NextDNS App":
+                                openApp("io.nextdns.NextDNS")
+                                stop()
+                            item "Open DNS in Settings":
+                                openURL("prefs:root=General&path=ManagedConfigurationList")
+                                stop()
+                            item "Change Preferences":
+                                @page = "prefs"
+                            item "Info":
+                                @page = "info"
+                            item "Exit":
+                                stop()
+                        }
+                    } else {
+                        menu @mainHeading {
+                            item "Check Status":
+                                @page = "status"
+                            item "Swap PPQ Blocking On/Off":
+                                @page = "ppq"
+                            item "Add/Remove Sideload Ruleset":
+                                @page = "sideload"
+                            item "Add/Remove Custom DNS Rules":
+                                @page = "custom"
+                            item "Refresh Network Connection":
+                                @page = "refresh"
+                            item "Open NextDNS Website":
+                                openURL("https://my.nextdns.io")
+                                stop()
+                            item "Open DNS in Settings":
+                                openURL("prefs:root=General&path=ManagedConfigurationList")
+                                stop()
+                            item "Change Preferences":
+                                @page = "prefs"
+                            item "Info":
+                                @page = "info"
+                            item "Exit":
+                                stop()
+                        }
+                    }
+                } else {
+                    if @prefsApp == 1 {
+                        menu @mainHeading {
+                            item "Check Status":
+                                @page = "status"
+                            item "Add/Remove Custom DNS Rules":
+                                @page = "custom"
+                            item "Refresh Network Connection":
+                                @page = "refresh"
+                            item "Open NextDNS Website":
+                                openURL("https://my.nextdns.io")
+                                stop()
+                            item "Open NextDNS App":
+                                openApp("io.nextdns.NextDNS")
+                                stop()
+                            item "Open DNS in Settings":
+                                openURL("prefs:root=General&path=ManagedConfigurationList")
+                                stop()
+                            item "Change Preferences":
+                                @page = "prefs"
+                            item "Info":
+                                @page = "info"
+                            item "Exit":
+                                stop()
+                        }
+                    } else {
+                        menu @mainHeading {
+                            item "Check Status":
+                                @page = "status"
+                            item "Add/Remove Custom DNS Rules":
+                                @page = "custom"
+                            item "Refresh Network Connection":
+                                @page = "refresh"
+                            item "Open NextDNS Website":
+                                openURL("https://my.nextdns.io")
+                                stop()
+                            item "Open DNS in Settings":
+                                openURL("prefs:root=General&path=ManagedConfigurationList")
+                                stop()
+                            item "Change Preferences":
+                                @page = "prefs"
+                            item "Info":
+                                @page = "info"
+                            item "Exit":
+                                stop()
+                        }
+                    }
+                }
+            }
+        }
+
+        if @page == "status" {
+            @noticeIsAction = 0
+            if @prefsSideload == 1 {
+                menu "Check Status" {
+                    item "Sideloading Ruleset":
+                        @page = "sideStatus"
+                    item "Denylist":
+                        @page = "statusDeny"
+                    item "Allowlist":
+                        @page = "statusAllow"
+                    item "Privacy Blocklists":
+                        @page = "statusPrivacy"
+                    item "Privacy Protections":
+                        @page = "statusPrivacyProtections"
+                    item "Security Protections":
+                        @page = "statusSecurityProtections"
+                    item "Analytics":
+                        @page = "analytics"
+                    item "Back":
+                        @page = "main"
+                    item "Exit":
+                        stop()
+                }
+            } else {
+                menu "Check Status" {
+                    item "Denylist":
+                        @page = "statusDeny"
+                    item "Allowlist":
+                        @page = "statusAllow"
+                    item "Privacy Blocklists":
+                        @page = "statusPrivacy"
+                    item "Privacy Protections":
+                        @page = "statusPrivacyProtections"
+                    item "Security Protections":
+                        @page = "statusSecurityProtections"
+                    item "Analytics":
+                        @page = "analytics"
+                    item "Back":
+                        @page = "main"
+                    item "Exit":
+                        stop()
+                }
+            }
+        }
+
+        if @page == "statusDeny" {
+            @denyStatus = ""
+            repeat displayDenyIndex for @denyCount {
+                @displayDenyItem = getListItem(@denyRecords, @displayDenyIndex)
+                @displayDenyDict = getDictionary(@displayDenyItem)
+                @displayDenyId = getValue(@displayDenyDict, "id")
+                @displayDenyDomain = "{@displayDenyId}"
+                @displayDenyActive = getValue(@displayDenyDict, "active")
+                @displayDenyActiveText = "{@displayDenyActive}"
+                if @displayDenyDomain == "" || @displayDenyActiveText == "" {
+                    @denyStatus += "UNREADABLE RULE\n"
+                } else {
+                    if @displayDenyActiveText == "Yes" || @displayDenyActiveText == "true" || @displayDenyActiveText == "True" || @displayDenyActiveText == "1" {
+                        @denyStatus += "ON  |  {@displayDenyDomain}\n"
+                    } else {
+                        @denyStatus += "OFF  |  {@displayDenyDomain}\n"
+                    }
+                }
+            }
+            @noticeTitle = "Current Denylist"
+            @noticeParent = "status"
+            @noticeText = "{@denyStatus}\nON = domain is blocked\nOFF = domain is not being blocked"
+            if @denyCount == 0 {
+                @noticeText = "There are currently no rules in your denylist."
+            }
+            if @denyOK == 0 {
+                @noticeText = "Your denylist couldn't be loaded. \n\nTry checking your NextDNS account, your API key & Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+            }
+            @page = "notice"
+        }
+        if @page == "statusAllow" {
+            @allowStatus = ""
+            repeat displayAllowIndex for @allowCount {
+                @displayAllowItem = getListItem(@allowRecords, @displayAllowIndex)
+                @displayAllowDict = getDictionary(@displayAllowItem)
+                @displayAllowId = getValue(@displayAllowDict, "id")
+                @displayAllowDomain = "{@displayAllowId}"
+                @displayAllowActive = getValue(@displayAllowDict, "active")
+                @displayAllowActiveText = "{@displayAllowActive}"
+                if @displayAllowDomain == "" || @displayAllowActiveText == "" {
+                    @allowStatus += "UNREADABLE RULE\n"
+                } else {
+                    if @displayAllowActiveText == "Yes" || @displayAllowActiveText == "true" || @displayAllowActiveText == "True" || @displayAllowActiveText == "1" {
+                        @allowStatus += "ON  |  {@displayAllowDomain}\n"
+                    } else {
+                        @allowStatus += "OFF  |  {@displayAllowDomain}\n"
+                    }
+                }
+            }
+            @noticeTitle = "Current Allowlist"
+            @noticeParent = "status"
+            @noticeText = "{@allowStatus}\nON = domain is allowed by this rule\nOFF = rule exists, but allowing is disabled"
+            if @allowCount == 0 {
+                @noticeText = "There are currently no rules in your allowlist."
+            }
+            if @allowOK == 0 {
+                @noticeText = "Your allowlist couldn't be loaded.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+            }
+            @page = "notice"
+        }
+        if @page == "statusPrivacy" {
+            @privacyStatus = ""
+            repeat displayPrivacyIndex for @privacyCount {
+                @displayPrivacyItem = getListItem(@privacyRecords, @displayPrivacyIndex)
+                @displayPrivacyDict = getDictionary(@displayPrivacyItem)
+                @displayPrivacyId = getValue(@displayPrivacyDict, "id")
+                @displayPrivacyDomain = "{@displayPrivacyId}"
+                @displayPrivacyKeys = getKeys(@displayPrivacyDict)
+                @displayPrivacyKeysText = "{@displayPrivacyKeys}"
+                if @displayPrivacyKeysText contains "name" {
+                    @displayPrivacyName = getValue(@displayPrivacyDict, "name")
+                    @displayPrivacyNameText = "{@displayPrivacyName}"
+                    if @displayPrivacyNameText != "" {
+                        @displayPrivacyDomain = "{@displayPrivacyNameText}"
+                    }
+                }
+                if @displayPrivacyDomain == "" {
+                    @privacyStatus += "UNREADABLE BLOCKLIST\n"
+                } else {
+                    @privacyStatus += "ON  |  {@displayPrivacyDomain}\n"
+                }
+            }
+            @noticeTitle = "Current Enabled Privacy Blocklists"
+            @noticeParent = "status"
+            @noticeText = "{@privacyStatus}"
+            if @privacyCount == 0 {
+                @noticeText = "There are currently no privacy blocklists enabled in this NextDNS profile."
+            }
+            if @privacyOK == 0 {
+                @noticeText = "Your privacy blocklists couldn't be loaded.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+            }
+            @page = "notice"
+        }
+
+        if @page == "statusPrivacyProtections" {
+            @privacyProtectionsEnabled = 0
+            @privacyProtectionsStatus = ""
+            if @profileOK == 1 {
+                if @profileDataKeysText contains "privacy" {
+                    @profilePrivacyRaw = getValue(@profileDataDict, "privacy")
+                    @profilePrivacyDict = getDictionary(@profilePrivacyRaw)
+                    @profilePrivacyKeys = getKeys(@profilePrivacyDict)
+                    @privacyProtectionsOK = 1
+                    @profilePrivacyKeyCount = count(@profilePrivacyKeys)
+                    repeat privacyOptionIndex for @profilePrivacyKeyCount {
+                        @privacyKeyRaw = getListItem(@profilePrivacyKeys, @privacyOptionIndex)
+                        @privacyKey = "{@privacyKeyRaw}"
+                        if @privacyKey == "natives" {
+                            @nativeEntries = getValue(@profilePrivacyDict, "natives")
+                            @nativeEntryCount = count(@nativeEntries)
+                            repeat nativeEntryIndex for @nativeEntryCount {
+                                @nativeItem = getListItem(@nativeEntries, @nativeEntryIndex)
+                                @nativeDict = getDictionary(@nativeItem)
+                                @nativeIdRaw = getValue(@nativeDict, "id")
+                                @nativeId = "{@nativeIdRaw}"
+                                @nativeOn = 1
+                                @nativeKeys = getKeys(@nativeDict)
+                                @nativeKeysText = "{@nativeKeys}"
+                                if @nativeKeysText contains "active" {
+                                    @nativeActiveRaw = getValue(@nativeDict, "active")
+                                    @nativeActiveText = "{@nativeActiveRaw}"
+                                    if @nativeActiveText == "No" || @nativeActiveText == "false" || @nativeActiveText == "False" || @nativeActiveText == "0" {
+                                        @nativeOn = 0
+                                    }
+                                }
+                                if @nativeId == "" {
+                                    @privacyProtectionsOK = 0
+                                } else {
+                                    if @nativeOn == 1 {
+                                        @nativeLabel = "{@nativeId}"
+                                        if @nativeId == "apple" {
+                                            @nativeLabel = "Apple"
+                                        }
+                                        if @nativeId == "windows" {
+                                            @nativeLabel = "Windows"
+                                        }
+                                        if @nativeId == "samsung" {
+                                            @nativeLabel = "Samsung"
+                                        }
+                                        if @nativeId == "huawei" {
+                                            @nativeLabel = "Huawei"
+                                        }
+                                        if @nativeId == "roku" {
+                                            @nativeLabel = "Roku"
+                                        }
+                                        if @nativeId == "alexa" {
+                                            @nativeLabel = "Alexa"
+                                        }
+                                        if @nativeId == "xiaomi" {
+                                            @nativeLabel = "Xiaomi"
+                                        }
+                                        if @nativeId == "sonos" {
+                                            @nativeLabel = "Sonos"
+                                        }
+                                        @privacyProtectionsEnabled += 1
+                                        @privacyProtectionsStatus += "Native Tracking: {@nativeLabel}\n"
+                                    }
+                                }
+                            }
+                        } else {
+                            if @privacyKey != "blocklists" {
+                                @privacyValueRaw = getValue(@profilePrivacyDict, @privacyKey)
+                                @privacyValueText = "{@privacyValueRaw}"
+                                if @privacyValueText == "Yes" || @privacyValueText == "true" || @privacyValueText == "True" || @privacyValueText == "1" {
+                                    @privacyLabel = "{@privacyKey}"
+                                    if @privacyKey == "disguisedTrackers" || @privacyKey == "blockDisguised" {
+                                        @privacyLabel = "Block Disguised Third-Party Trackers"
+                                    }
+                                    if @privacyKey == "allowAffiliate" {
+                                        @privacyLabel = "Allow Tracking Links"
+                                    }
+                                    if @privacyKey == "rotatingAds" || @privacyKey == "blockRotatingAds" || @privacyKey == "blockRotatingAdDomains" {
+                                        @privacyLabel = "Block Rotating Ad Domains"
+                                    }
+                                    @privacyProtectionsEnabled += 1
+                                    @privacyProtectionsStatus += "{@privacyLabel}\n"
+                                }
+                            }
+                        }
+                    }
+                    if @privacyProtectionsOK == 1 {
+                        @privacyProtectionsSummary = "{@privacyProtectionsEnabled}"
+                    }
+                }
+            }
+            @protectionDetails = "{@privacyProtectionsStatus}"
+            if @privacyProtectionsEnabled == 0 {
+                @protectionDetails = "No privacy protections are enabled (excluding blocklists)."
+            }
+            if @privacyProtectionsOK == 0 {
+                @protectionDetails = "Couldn't verify the current privacy protections. \n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+            }
+            show("Enabled Privacy Protections\n\n{@protectionDetails}")
+            @page = "status"
+        }
+        if @page == "statusSecurityProtections" {
+            @securityProtectionsEnabled = 0
+            @securityProtectionsStatus = ""
+            if @profileOK == 1 {
+                if @profileDataKeysText contains "security" {
+                    @profileSecurityRaw = getValue(@profileDataDict, "security")
+                    @profileSecurityDict = getDictionary(@profileSecurityRaw)
+                    @profileSecurityKeys = getKeys(@profileSecurityDict)
+                    @securityProtectionsOK = 1
+                    @profileSecurityKeyCount = count(@profileSecurityKeys)
+                    repeat securityOptionIndex for @profileSecurityKeyCount {
+                        @securityKeyRaw = getListItem(@profileSecurityKeys, @securityOptionIndex)
+                        @securityKey = "{@securityKeyRaw}"
+                        if @securityKey == "tlds" {
+                            @securityTLDEntries = getValue(@profileSecurityDict, "tlds")
+                            @securityTLDCount = count(@securityTLDEntries)
+                            if @securityTLDCount > 0 {
+                                @securityProtectionsEnabled += 1
+                                @securityProtectionsStatus += "Top-Level Domains ({@securityTLDCount} blocked)\n"
+                            }
+                        } else {
+                            // ignore deprecated protection flags
+                            if @securityKey != "idnHomographs" && @securityKey != "typosquatting" {
+                                @securityValueRaw = getValue(@profileSecurityDict, @securityKey)
+                                @securityValueText = "{@securityValueRaw}"
+                                if @securityValueText == "Yes" || @securityValueText == "true" || @securityValueText == "True" || @securityValueText == "1" {
+                                    @securityLabel = "{@securityKey}"
+                                    if @securityKey == "threatIntelligenceFeeds" {
+                                        @securityLabel = "Threat Intelligence Feeds"
+                                    }
+                                    if @securityKey == "aiThreatDetection" {
+                                        @securityLabel = "AI-Driven Threat Detection"
+                                    }
+                                    if @securityKey == "googleSafeBrowsing" {
+                                        @securityLabel = "Google Safe Browsing"
+                                    }
+                                    if @securityKey == "nrd" {
+                                        @securityLabel = "Newly Registered Domains"
+                                    }
+                                    if @securityKey == "ddns" {
+                                        @securityLabel = "Dynamic DNS Hostnames"
+                                    }
+                                    if @securityKey == "cryptojacking" {
+                                        @securityLabel = "Cryptocurrency Mining"
+                                    }
+                                    if @securityKey == "dnsRebinding" {
+                                        @securityLabel = "Local Network Address Protection (DNS Rebinding)"
+                                    }
+                                    if @securityKey == "parking" {
+                                        @securityLabel = "Parked Domains"
+                                    }
+                                    if @securityKey == "dga" {
+                                        @securityLabel = "Domain Generation Algorithms"
+                                    }
+                                    if @securityKey == "csam" {
+                                        @securityLabel = "Child Sexual Abuse Material (CSAM)"
+                                    }
+                                    // label recognized settings, otherwise show the original API field name.
+                                    if @securityKey == "newlyActiveDomains" || @securityKey == "nad" {
+                                        @securityLabel = "Newly Active Domains"
+                                    }
+                                    if @securityKey == "freeHostingDomains" {
+                                        @securityLabel = "Free Hosting Domains"
+                                    }
+                                    if @securityKey == "tunnelingEndpoints" || @securityKey == "tunnellingEndpoints" {
+                                        @securityLabel = "Tunneling Endpoints"
+                                    }
+                                    if @securityKey == "residentialHosting" {
+                                        @securityLabel = "Residential Hosting"
+                                    }
+                                    if @securityKey == "untrustedCertificates" {
+                                        @securityLabel = "Untrusted Certificates"
+                                    }
+                                    if @securityKey == "dataDropServices" {
+                                        @securityLabel = "Data Drop Services"
+                                    }
+                                    if @securityKey == "dnsPayloadDelivery" {
+                                        @securityLabel = "DNS Payload Delivery"
+                                    }
+                                    if @securityKey == "decentralizedWebGateways" || @securityKey == "decentralisedWebGateways" {
+                                        @securityLabel = "Decentralized Web Gateways"
+                                    }
+                                    if @securityKey == "highRiskTlds" || @securityKey == "highRiskTLDs" {
+                                        @securityLabel = "High-Risk TLDs"
+                                    }
+                                    @securityProtectionsEnabled += 1
+                                    @securityProtectionsStatus += "{@securityLabel}\n"
+                                }
+                            }
+                        }
+                    }
+                    if @securityProtectionsOK == 1 {
+                        @securityProtectionsSummary = "{@securityProtectionsEnabled}"
+                    }
+                }
+            }
+            @protectionDetails = "{@securityProtectionsStatus}"
+            if @securityProtectionsEnabled == 0 {
+                @protectionDetails = "No security protections are enabled."
+            }
+            if @securityProtectionsOK == 0 {
+                @protectionDetails = "Couldn't verify the current security protections.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+            }
+            show("Enabled Security Protections\n\n{@protectionDetails}")
+            @page = "status"
+        }
+
+        if @page == "analytics" {
+            @period = ""
+            @from = ""
+            menu "NextDNS Analytics\nChoose a Time Period" {
+                item "Last 24 Hours":
+                    @period = "Last 24 Hours"
+                    @from = "-1d"
+                    @page = "analyticsResult"
+                item "Last 7 Days":
+                    @period = "Last 7 Days"
+                    @from = "-7d"
+                    @page = "analyticsResult"
+                item "Last 30 Days":
+                    @period = "Last 30 Days"
+                    @from = "-30d"
+                    @page = "analyticsResult"
+                item "Back":
+                    @page = "status"
+                item "Exit":
+                    stop()
+            }
+        }
+
+        if @page == "analyticsResult" {
+            // analytics covers the selected period across all devices
+            @statsURL = "{@analyticsEndpoint}?from={@from}&to=now&limit=500"
+            @statsResponse = downloadURL(@statsURL, {"X-Api-Key": "{@apiKey}"})
+            @statsDict = getDictionary(@statsResponse)
+            @statsKeys = getKeys(@statsDict)
+            @statsKeysText = "{@statsKeys}"
+            @blockedTotal = 0
+            @statusTotal = 0
+            @statusOK = 0
+            @badStatsRows = 0
+            if @statsKeysText contains "data" {
+                @stats = getValue(@statsDict, "data")
+                @statsRows = count(@stats)
+                @statusOK = 1
+                repeat statsRowIndex for @statsRows {
+                    @stat = getListItem(@stats, @statsRowIndex)
+                    @statDict = getDictionary(@stat)
+                    @statusRaw = getValue(@statDict, "status")
+                    @statusText = "{@statusRaw}"
+                    @queriesRaw = getValue(@statDict, "queries")
+                    @queriesText = "{@queriesRaw}"
+                    if @statusText == "" || @queriesText == "" {
+                        @badStatsRows += 1
+                    } else {
+                        @queries = number(@queriesText)
+                        @statusTotal += @queries
+                        if @statusText == "blocked" {
+                            @blockedTotal += @queries
+                        }
+                    }
+                }
+                if @badStatsRows > 0 {
+                    @statusOK = 0
+                }
+            }
+
+            @protocolURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/protocols?from={@from}&to=now&limit=500"
+            @protocolResponse = downloadURL(@protocolURL, {"X-Api-Key": "{@apiKey}"})
+            @protocolDict = getDictionary(@protocolResponse)
+            @protocolKeys = getKeys(@protocolDict)
+            @protocolKeysText = "{@protocolKeys}"
+            @protocolOK = 0
+            @protocolTotal = 0
+            if @protocolKeysText contains "data" {
+                @protocols = getValue(@protocolDict, "data")
+                @protocolRows = count(@protocols)
+                @protocolBadRows = 0
+                repeat protocolRowIndex for @protocolRows {
+                    @protocolItem = getListItem(@protocols, @protocolRowIndex)
+                    @protocolRow = getDictionary(@protocolItem)
+                    @protocolName = getValue(@protocolRow, "protocol")
+                    @protocolNameText = "{@protocolName}"
+                    @protocolQueries = getValue(@protocolRow, "queries")
+                    @protocolQueriesText = "{@protocolQueries}"
+                    if @protocolNameText == "" || @protocolQueriesText == "" {
+                        @protocolBadRows += 1
+                    } else {
+                        @protocolValue = number(@protocolQueriesText)
+                        @protocolTotal += @protocolValue
+                    }
+                }
+                if @protocolBadRows == 0 && @protocolRows > 0 {
+                    @protocolOK = 1
+                }
+            }
+            @total = 0
+            if @protocolOK == 1 {
+                @total = @protocolTotal
+            } else {
+                if @statusOK == 1 && @statsRows > 1 {
+                    @total = @statusTotal
+                }
+            }
+            @analyticsText = "Period: {@period}\nDevices: All Devices"
+            if @statusOK == 1 && @total > 0 && @blockedTotal <= @total {
+                @scaled = @blockedTotal * 100
+                @rawPercent = @scaled / @total
+                @percent = formatNumber(@rawPercent, 1)
+                @totalFormatted = formatNumber(@total, 0)
+                @blockedFormatted = formatNumber(@blockedTotal, 0)
+                @analyticsText += "\n\nTotal Queries: {@totalFormatted}\nBlocked Queries: {@blockedFormatted}\nBlocked Percentage: {@percent}%"
+            } else {
+                // dont show missing or inconsistent data as valid percentages
+                @analyticsText += "\n\nTotal Queries: Unavailable\nBlocked Queries: Unavailable\nBlocked Percentage: Unavailable"
+            }
+
+            @resolvedURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/domains?status=default&from={@from}&to=now&limit=5"
+            @resolvedResponse = downloadURL(@resolvedURL, {"X-Api-Key": "{@apiKey}"})
+            @resolvedDict = getDictionary(@resolvedResponse)
+            @resolvedKeys = getKeys(@resolvedDict)
+            @resolvedKeysText = "{@resolvedKeys}"
+            @resolvedLines = "Unavailable"
+            if @resolvedKeysText contains "data" {
+                @resolvedData = getValue(@resolvedDict, "data")
+                @resolvedCount = count(@resolvedData)
+                @resolvedLines = "No data for this period."
+                @resolvedBad = 0
+                repeat resolvedRowIndex for @resolvedCount {
+                    @resolvedItem = getListItem(@resolvedData, @resolvedRowIndex)
+                    @resolvedRow = getDictionary(@resolvedItem)
+                    @resolvedNameRaw = getValue(@resolvedRow, "domain")
+                    @resolvedName = "{@resolvedNameRaw}"
+                    @resolvedQueryRaw = getValue(@resolvedRow, "queries")
+                    @resolvedQueryText = "{@resolvedQueryRaw}"
+                    if @resolvedName == "" || @resolvedQueryText == "" {
+                        @resolvedBad += 1
+                    } else {
+                        @resolvedQueryNum = number(@resolvedQueryText)
+                        @resolvedQueryFmt = formatNumber(@resolvedQueryNum, 0)
+                        @resolvedRank = @resolvedRowIndex
+                        if @resolvedRowIndex == 1 {
+                            @resolvedLines = "{@resolvedRank}. {@resolvedName}\n   {@resolvedQueryFmt} queries"
+                        } else {
+                            @resolvedLines += "\n{@resolvedRank}. {@resolvedName}\n   {@resolvedQueryFmt} queries"
+                        }
+                    }
+                }
+                if @resolvedBad > 0 {
+                    @resolvedLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nRESOLVED DOMAINS (TOP 5)\n{@resolvedLines}"
+
+            @blockedDomainsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/domains?status=blocked&from={@from}&to=now&limit=5"
+            @blockedDomainsResponse = downloadURL(@blockedDomainsURL, {"X-Api-Key": "{@apiKey}"})
+            @blockedDomainsDict = getDictionary(@blockedDomainsResponse)
+            @blockedDomainsKeys = getKeys(@blockedDomainsDict)
+            @blockedDomainsKeysText = "{@blockedDomainsKeys}"
+            @blockedDomainsLines = "Unavailable"
+            if @blockedDomainsKeysText contains "data" {
+                @blockedDomainsData = getValue(@blockedDomainsDict, "data")
+                @blockedDomainsCount = count(@blockedDomainsData)
+                @blockedDomainsLines = "No data for this period."
+                @blockedDomainsBad = 0
+                repeat blockedDomainsRowIndex for @blockedDomainsCount {
+                    @blockedDomainsItem = getListItem(@blockedDomainsData, @blockedDomainsRowIndex)
+                    @blockedDomainsRow = getDictionary(@blockedDomainsItem)
+                    @blockedDomainsNameRaw = getValue(@blockedDomainsRow, "domain")
+                    @blockedDomainsName = "{@blockedDomainsNameRaw}"
+                    @blockedDomainsQueryRaw = getValue(@blockedDomainsRow, "queries")
+                    @blockedDomainsQueryText = "{@blockedDomainsQueryRaw}"
+                    if @blockedDomainsName == "" || @blockedDomainsQueryText == "" {
+                        @blockedDomainsBad += 1
+                    } else {
+                        @blockedDomainsQueryNum = number(@blockedDomainsQueryText)
+                        @blockedDomainsQueryFmt = formatNumber(@blockedDomainsQueryNum, 0)
+                        @blockedDomainsRank = @blockedDomainsRowIndex
+                        if @blockedDomainsRowIndex == 1 {
+                            @blockedDomainsLines = "{@blockedDomainsRank}. {@blockedDomainsName}\n   {@blockedDomainsQueryFmt} queries"
+                        } else {
+                            @blockedDomainsLines += "\n{@blockedDomainsRank}. {@blockedDomainsName}\n   {@blockedDomainsQueryFmt} queries"
+                        }
+                    }
+                }
+                if @blockedDomainsBad > 0 {
+                    @blockedDomainsLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nBLOCKED DOMAINS (TOP 5)\n{@blockedDomainsLines}"
+
+            @reasonsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/reasons?from={@from}&to=now&limit=5"
+            @reasonsResponse = downloadURL(@reasonsURL, {"X-Api-Key": "{@apiKey}"})
+            @reasonsDict = getDictionary(@reasonsResponse)
+            @reasonsKeys = getKeys(@reasonsDict)
+            @reasonsKeysText = "{@reasonsKeys}"
+            @reasonsLines = "Unavailable"
+            if @reasonsKeysText contains "data" {
+                @reasonsData = getValue(@reasonsDict, "data")
+                @reasonsCount = count(@reasonsData)
+                @reasonsLines = "No data for this period."
+                @reasonsBad = 0
+                repeat reasonsRowIndex for @reasonsCount {
+                    @reasonsItem = getListItem(@reasonsData, @reasonsRowIndex)
+                    @reasonsRow = getDictionary(@reasonsItem)
+                    @reasonsNameRaw = getValue(@reasonsRow, "name")
+                    @reasonsName = "{@reasonsNameRaw}"
+                    if @reasonsName == "" {
+                        @reasonsIdRaw = getValue(@reasonsRow, "id")
+                        @reasonsName = "{@reasonsIdRaw}"
+                    }
+                    @reasonsQueryRaw = getValue(@reasonsRow, "queries")
+                    @reasonsQueryText = "{@reasonsQueryRaw}"
+                    if @reasonsName == "" || @reasonsQueryText == "" {
+                        @reasonsBad += 1
+                    } else {
+                        @reasonsQueryNum = number(@reasonsQueryText)
+                        @reasonsQueryFmt = formatNumber(@reasonsQueryNum, 0)
+                        @reasonsRank = @reasonsRowIndex
+                        if @reasonsRowIndex == 1 {
+                            @reasonsLines = "{@reasonsRank}. {@reasonsName}\n   {@reasonsQueryFmt} queries"
+                        } else {
+                            @reasonsLines += "\n{@reasonsRank}. {@reasonsName}\n   {@reasonsQueryFmt} queries"
+                        }
+                    }
+                }
+                if @reasonsBad > 0 {
+                    @reasonsLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nREASONS FOR BLOCKING\n{@reasonsLines}"
+
+            @deviceStatsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/devices?from={@from}&to=now&limit=5"
+            @deviceStatsResponse = downloadURL(@deviceStatsURL, {"X-Api-Key": "{@apiKey}"})
+            @deviceStatsDict = getDictionary(@deviceStatsResponse)
+            @deviceStatsKeys = getKeys(@deviceStatsDict)
+            @deviceStatsKeysText = "{@deviceStatsKeys}"
+            @deviceStatsLines = "Unavailable"
+            if @deviceStatsKeysText contains "data" {
+                @deviceStatsData = getValue(@deviceStatsDict, "data")
+                @deviceStatsCount = count(@deviceStatsData)
+                @deviceStatsLines = "No data for this period."
+                @deviceStatsBad = 0
+                repeat deviceStatsRowIndex for @deviceStatsCount {
+                    @deviceStatsItem = getListItem(@deviceStatsData, @deviceStatsRowIndex)
+                    @deviceStatsRow = getDictionary(@deviceStatsItem)
+                    @deviceStatsName = ""
+                    @deviceStatsRowKeys = getKeys(@deviceStatsRow)
+                    @deviceStatsRowKeysText = "{@deviceStatsRowKeys}"
+                    if @deviceStatsRowKeysText contains "name" {
+                        @deviceStatsNameRaw = getValue(@deviceStatsRow, "name")
+                        @deviceStatsName = "{@deviceStatsNameRaw}"
+                    }
+                    if @deviceStatsName == "" {
+                        @deviceStatsIdRaw = getValue(@deviceStatsRow, "id")
+                        @deviceStatsIdText = "{@deviceStatsIdRaw}"
+                        @deviceStatsName = "{@deviceStatsIdText}"
+                        if @deviceStatsIdText == "__UNIDENTIFIED__" {
+                            @deviceStatsName = "Unidentified Devices"
+                        }
+                    }
+                    @deviceStatsQueryRaw = getValue(@deviceStatsRow, "queries")
+                    @deviceStatsQueryText = "{@deviceStatsQueryRaw}"
+                    if @deviceStatsName == "" || @deviceStatsQueryText == "" {
+                        @deviceStatsBad += 1
+                    } else {
+                        @deviceStatsQueryNum = number(@deviceStatsQueryText)
+                        @deviceStatsQueryFmt = formatNumber(@deviceStatsQueryNum, 0)
+                        @deviceStatsRank = @deviceStatsRowIndex
+                        if @deviceStatsRowIndex == 1 {
+                            @deviceStatsLines = "{@deviceStatsRank}. {@deviceStatsName}\n   {@deviceStatsQueryFmt} queries"
+                        } else {
+                            @deviceStatsLines += "\n{@deviceStatsRank}. {@deviceStatsName}\n   {@deviceStatsQueryFmt} queries"
+                        }
+                    }
+                }
+                if @deviceStatsBad > 0 {
+                    @deviceStatsLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nDEVICES\n{@deviceStatsLines}"
+
+            @ipStatsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/ips?from={@from}&to=now&limit=3"
+            @ipStatsResponse = downloadURL(@ipStatsURL, {"X-Api-Key": "{@apiKey}"})
+            @ipStatsDict = getDictionary(@ipStatsResponse)
+            @ipStatsKeys = getKeys(@ipStatsDict)
+            @ipStatsKeysText = "{@ipStatsKeys}"
+            @ipStatsLines = "Unavailable"
+            if @ipStatsKeysText contains "data" {
+                @ipStatsData = getValue(@ipStatsDict, "data")
+                @ipStatsCount = count(@ipStatsData)
+                @ipStatsLines = "No data for this period."
+                @ipStatsBad = 0
+                repeat ipStatsRowIndex for @ipStatsCount {
+                    @ipStatsItem = getListItem(@ipStatsData, @ipStatsRowIndex)
+                    @ipStatsRow = getDictionary(@ipStatsItem)
+                    @ipStatsNameRaw = getValue(@ipStatsRow, "ip")
+                    @ipStatsName = "{@ipStatsNameRaw}"
+                    @ipStatsQueryRaw = getValue(@ipStatsRow, "queries")
+                    @ipStatsQueryText = "{@ipStatsQueryRaw}"
+                    if @ipStatsName == "" || @ipStatsQueryText == "" {
+                        @ipStatsBad += 1
+                    } else {
+                        @ipStatsQueryNum = number(@ipStatsQueryText)
+                        @ipStatsQueryFmt = formatNumber(@ipStatsQueryNum, 0)
+                        @ipStatsRank = @ipStatsRowIndex
+                        if @ipStatsRowIndex == 1 {
+                            @ipStatsLines = "{@ipStatsRank}. {@ipStatsName}\n   {@ipStatsQueryFmt} queries"
+                        } else {
+                            @ipStatsLines += "\n{@ipStatsRank}. {@ipStatsName}\n   {@ipStatsQueryFmt} queries"
+                        }
+                    }
+                }
+                if @ipStatsBad > 0 {
+                    @ipStatsLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nIPs (TOP 3)\n{@ipStatsLines}"
+
+            @rootsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/domains?root=true&from={@from}&to=now&limit=5"
+            @rootsResponse = downloadURL(@rootsURL, {"X-Api-Key": "{@apiKey}"})
+            @rootsDict = getDictionary(@rootsResponse)
+            @rootsKeys = getKeys(@rootsDict)
+            @rootsKeysText = "{@rootsKeys}"
+            @rootsLines = "Unavailable"
+            if @rootsKeysText contains "data" {
+                @rootsData = getValue(@rootsDict, "data")
+                @rootsCount = count(@rootsData)
+                @rootsLines = "No data for this period."
+                @rootsBad = 0
+                repeat rootsRowIndex for @rootsCount {
+                    @rootsItem = getListItem(@rootsData, @rootsRowIndex)
+                    @rootsRow = getDictionary(@rootsItem)
+                    @rootsNameRaw = getValue(@rootsRow, "domain")
+                    @rootsName = "{@rootsNameRaw}"
+                    @rootsQueryRaw = getValue(@rootsRow, "queries")
+                    @rootsQueryText = "{@rootsQueryRaw}"
+                    if @rootsName == "" || @rootsQueryText == "" {
+                        @rootsBad += 1
+                    } else {
+                        @rootsQueryNum = number(@rootsQueryText)
+                        @rootsQueryFmt = formatNumber(@rootsQueryNum, 0)
+                        @rootsRank = @rootsRowIndex
+                        if @rootsRowIndex == 1 {
+                            @rootsLines = "{@rootsRank}. {@rootsName}\n   {@rootsQueryFmt} queries"
+                        } else {
+                            @rootsLines += "\n{@rootsRank}. {@rootsName}\n   {@rootsQueryFmt} queries"
+                        }
+                    }
+                }
+                if @rootsBad > 0 {
+                    @rootsLines = "Unavailable (incomplete API data)"
+                }
+            }
+            @analyticsText += "\n\nROOT DOMAINS (TOP 5)\n{@rootsLines}"
+
+            // include "others" in the GAFAM percent denominator
+            @gafamURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/destinations?type=gafam&from={@from}&to=now&limit=50"
+            @gafamResponse = downloadURL(@gafamURL, {"X-Api-Key": "{@apiKey}"})
+            @gafamDict = getDictionary(@gafamResponse)
+            @gafamKeys = getKeys(@gafamDict)
+            @gafamKeysText = "{@gafamKeys}"
+            @gafamLines = "Unavailable"
+            if @gafamKeysText contains "data" {
+                @gafamData = getValue(@gafamDict, "data")
+                @gafamCount = count(@gafamData)
+                @gafamTotal = 0
+                @gafamGoogle = 0
+                @gafamApple = 0
+                @gafamMicrosoft = 0
+                @gafamAmazon = 0
+                @gafamMeta = 0
+                @gafamBad = 0
+                repeat gafamRowIndex for @gafamCount {
+                    @gafamItem = getListItem(@gafamData, @gafamRowIndex)
+                    @gafamRow = getDictionary(@gafamItem)
+                    @gafamCompanyRaw = getValue(@gafamRow, "company")
+                    @gafamCompany = "{@gafamCompanyRaw}"
+                    @gafamQueryRaw = getValue(@gafamRow, "queries")
+                    @gafamQueryText = "{@gafamQueryRaw}"
+                    if @gafamCompany == "" || @gafamQueryText == "" {
+                        @gafamBad += 1
+                    } else {
+                        @gafamCountValue = number(@gafamQueryText)
+                        @gafamTotal += @gafamCountValue
+                        if @gafamCompany == "google" {
+                            @gafamGoogle += @gafamCountValue
+                        }
+                        if @gafamCompany == "apple" {
+                            @gafamApple += @gafamCountValue
+                        }
+                        if @gafamCompany == "microsoft" {
+                            @gafamMicrosoft += @gafamCountValue
+                        }
+                        if @gafamCompany == "amazon" {
+                            @gafamAmazon += @gafamCountValue
+                        }
+                        if @gafamCompany == "facebook" || @gafamCompany == "meta" {
+                            @gafamMeta += @gafamCountValue
+                        }
+                    }
+                }
+                @gafamLines = "No data for this period."
+                if @gafamBad > 0 {
+                    @gafamLines = "Unavailable (incomplete API data)"
+                } else {
+                    if @gafamTotal > 0 {
+                        @gafamFive = @gafamGoogle + @gafamApple
+                        @gafamFive += @gafamMicrosoft
+                        @gafamFive += @gafamAmazon
+                        @gafamFive += @gafamMeta
+                        @gafamShareRaw = @gafamFive * 100
+                        @gafamShareRaw = @gafamShareRaw / @gafamTotal
+                        @gafamGoogleRaw = @gafamGoogle * 100
+                        @gafamGoogleRaw = @gafamGoogleRaw / @gafamTotal
+                        @gafamAppleRaw = @gafamApple * 100
+                        @gafamAppleRaw = @gafamAppleRaw / @gafamTotal
+                        @gafamMicrosoftRaw = @gafamMicrosoft * 100
+                        @gafamMicrosoftRaw = @gafamMicrosoftRaw / @gafamTotal
+                        @gafamAmazonRaw = @gafamAmazon * 100
+                        @gafamAmazonRaw = @gafamAmazonRaw / @gafamTotal
+                        @gafamMetaRaw = @gafamMeta * 100
+                        @gafamMetaRaw = @gafamMetaRaw / @gafamTotal
+                        @gafamShare = formatNumber(@gafamShareRaw, 1)
+                        @gafamGooglePercent = formatNumber(@gafamGoogleRaw, 1)
+                        @gafamApplePercent = formatNumber(@gafamAppleRaw, 1)
+                        @gafamMicrosoftPercent = formatNumber(@gafamMicrosoftRaw, 1)
+                        @gafamAmazonPercent = formatNumber(@gafamAmazonRaw, 1)
+                        @gafamMetaPercent = formatNumber(@gafamMetaRaw, 1)
+                        @gafamLines = "Total GAFAM Share: {@gafamShare}%\nGoogle: {@gafamGooglePercent}%\nApple: {@gafamApplePercent}%\nMicrosoft: {@gafamMicrosoftPercent}%\nAmazon: {@gafamAmazonPercent}%\nMeta: {@gafamMetaPercent}%"
+                    }
+                }
+            }
+            @analyticsText += "\n\nGAFAM DOMINANCE\n{@gafamLines}"
+
+            @encStatsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/encryption?from={@from}&to=now&limit=20"
+            @encStatsResponse = downloadURL(@encStatsURL, {"X-Api-Key": "{@apiKey}"})
+            @encStatsDict = getDictionary(@encStatsResponse)
+            @encStatsKeys = getKeys(@encStatsDict)
+            @encStatsKeysText = "{@encStatsKeys}"
+            @encStatsLines = "Unavailable"
+            if @encStatsKeysText contains "data" {
+                @encStatsData = getValue(@encStatsDict, "data")
+                @encStatsCount = count(@encStatsData)
+                @encStatsOn = 0
+                @encStatsOff = 0
+                @encStatsBad = 0
+                repeat encStatsRowIndex for @encStatsCount {
+                    @encStatsItem = getListItem(@encStatsData, @encStatsRowIndex)
+                    @encStatsRow = getDictionary(@encStatsItem)
+                    @encStatsFlagRaw = getValue(@encStatsRow, "encrypted")
+                    @encStatsFlagText = "{@encStatsFlagRaw}"
+                    @encStatsQueriesRaw = getValue(@encStatsRow, "queries")
+                    @encStatsQueriesText = "{@encStatsQueriesRaw}"
+                    if @encStatsQueriesText == "" {
+                        @encStatsBad += 1
+                    } else {
+                        @encStatsQueriesNum = number(@encStatsQueriesText)
+                        if @encStatsFlagText == "Yes" || @encStatsFlagText == "true" || @encStatsFlagText == "True" || @encStatsFlagText == "1" {
+                            @encStatsOn += @encStatsQueriesNum
+                        } else {
+                            if @encStatsFlagText == "No" || @encStatsFlagText == "false" || @encStatsFlagText == "False" || @encStatsFlagText == "0" {
+                                @encStatsOff += @encStatsQueriesNum
+                            } else {
+                                @encStatsBad += 1
+                            }
+                        }
+                    }
+                }
+                @encStatsLines = "No data for this period."
+                @encStatsTotal = @encStatsOn + @encStatsOff
+                if @encStatsBad > 0 {
+                    @encStatsLines = "Unavailable (incomplete API data)"
+                } else {
+                    if @encStatsTotal > 0 {
+                        @encStatsOnRaw = @encStatsOn * 100
+                        @encStatsOnRaw = @encStatsOnRaw / @encStatsTotal
+                        @encStatsOffRaw = @encStatsOff * 100
+                        @encStatsOffRaw = @encStatsOffRaw / @encStatsTotal
+                        @encStatsOnPct = formatNumber(@encStatsOnRaw, 1)
+                        @encStatsOffPct = formatNumber(@encStatsOffRaw, 1)
+                        @encStatsLines = "Encrypted: {@encStatsOnPct}%\nUnencrypted: {@encStatsOffPct}%"
+                    }
+                }
+            }
+            @analyticsText += "\n\nENCRYPTED DNS\n{@encStatsLines}"
+
+            @dnssecStatsURL = "https://api.nextdns.io/profiles/{@profileId}/analytics/dnssec?from={@from}&to=now&limit=20"
+            @dnssecStatsResponse = downloadURL(@dnssecStatsURL, {"X-Api-Key": "{@apiKey}"})
+            @dnssecStatsDict = getDictionary(@dnssecStatsResponse)
+            @dnssecStatsKeys = getKeys(@dnssecStatsDict)
+            @dnssecStatsKeysText = "{@dnssecStatsKeys}"
+            @dnssecStatsLines = "Unavailable"
+            if @dnssecStatsKeysText contains "data" {
+                @dnssecStatsData = getValue(@dnssecStatsDict, "data")
+                @dnssecStatsCount = count(@dnssecStatsData)
+                @dnssecStatsOn = 0
+                @dnssecStatsOff = 0
+                @dnssecStatsBad = 0
+                repeat dnssecStatsRowIndex for @dnssecStatsCount {
+                    @dnssecStatsItem = getListItem(@dnssecStatsData, @dnssecStatsRowIndex)
+                    @dnssecStatsRow = getDictionary(@dnssecStatsItem)
+                    @dnssecStatsFlagRaw = getValue(@dnssecStatsRow, "validated")
+                    @dnssecStatsFlagText = "{@dnssecStatsFlagRaw}"
+                    @dnssecStatsQueriesRaw = getValue(@dnssecStatsRow, "queries")
+                    @dnssecStatsQueriesText = "{@dnssecStatsQueriesRaw}"
+                    if @dnssecStatsQueriesText == "" {
+                        @dnssecStatsBad += 1
+                    } else {
+                        @dnssecStatsQueriesNum = number(@dnssecStatsQueriesText)
+                        if @dnssecStatsFlagText == "Yes" || @dnssecStatsFlagText == "true" || @dnssecStatsFlagText == "True" || @dnssecStatsFlagText == "1" {
+                            @dnssecStatsOn += @dnssecStatsQueriesNum
+                        } else {
+                            if @dnssecStatsFlagText == "No" || @dnssecStatsFlagText == "false" || @dnssecStatsFlagText == "False" || @dnssecStatsFlagText == "0" {
+                                @dnssecStatsOff += @dnssecStatsQueriesNum
+                            } else {
+                                @dnssecStatsBad += 1
+                            }
+                        }
+                    }
+                }
+                @dnssecStatsLines = "No data for this period."
+                @dnssecStatsTotal = @dnssecStatsOn + @dnssecStatsOff
+                if @dnssecStatsBad > 0 {
+                    @dnssecStatsLines = "Unavailable (incomplete API data)"
+                } else {
+                    if @dnssecStatsTotal > 0 {
+                        @dnssecStatsOnRaw = @dnssecStatsOn * 100
+                        @dnssecStatsOnRaw = @dnssecStatsOnRaw / @dnssecStatsTotal
+                        @dnssecStatsOffRaw = @dnssecStatsOff * 100
+                        @dnssecStatsOffRaw = @dnssecStatsOffRaw / @dnssecStatsTotal
+                        @dnssecStatsOnPct = formatNumber(@dnssecStatsOnRaw, 1)
+                        @dnssecStatsOffPct = formatNumber(@dnssecStatsOffRaw, 1)
+                        @dnssecStatsLines = "Validated: {@dnssecStatsOnPct}%\nNot Validated: {@dnssecStatsOffPct}%"
+                    }
+                }
+            }
+            @analyticsText += "\n\nDNSSEC\n{@dnssecStatsLines}"
+
+            show("NextDNS Analytics\n\n{@analyticsText}")
+            @page = "analytics"
+        }
+
+        if @page == "ppq" {
+            @noticeIsAction = 1
+            if @denyOK == 0 {
+                @noticeTitle = "Unable to Check PPQ"
+                @noticeText = "Your denylist couldn't be loaded. No changes were made."
+                @noticeParent = "main"
+                @page = "notice"
+            } else {
+                if @ppqFound == 0 {
+                    @noticeTitle = "PPQ Rule Not Found"
+                    @noticeText = "The ppq.apple.com rule hasn't been added yet. Use 'Add Sideload Denylist Ruleset' first."
+                    @noticeParent = "main"
+                    @page = "notice"
+                } else {
+                    @ppqScreen = "Current PPQ Block Status: OFF\n\nIf you're done installing sideloaded apps for now, make sure to turn PPQ blocking back on.\nCome back to swap it again when you are about to install sideloaded app(s). "
+                    @toggleLabel = "Turn PPQ blocking on"
+                    @ppqResult = "PPQ blocking is now ON"
+                    @expectedActive = "Yes"
+                    if @ppqBlocked == 1 {
+                        @ppqScreen = "Current PPQ Block Status: ON\n\nIf you're about to install a sideloaded app, it's highly recommended to turn PPQ blocking off. \nMake sure to use this again to restore it when you're done installing apps!! "
+                        @toggleLabel = "Turn PPQ blocking off"
+                        @ppqResult = "PPQ blocking is now OFF"
+                        @expectedActive = "No"
+                    }
+                    show(@ppqScreen)
+                    menu "PPQ Blocking" {
+                        item @toggleLabel:
+                            @intent = "toggle"
+                            @targetEndpoint = "{@denyEndpoint}"
+                            @targetDomains = ["ppq.apple.com"]
+                            @listName = "denylist"
+                            @confirmParent = "main"
+                            @page = "working"
+                        item "Back":
+                            @page = "main"
+                        item "Exit":
+                            stop()
+                    }
+                }
+            }
+        }
+
+        if @page == "sideload" {
+            menu "Sideloading Denylist Rules\n\nPPQ: {@ppqStatus}\nEnabled Sideload Rules: {@sideloadEnabled}/{@sideloadCount}\nMissing Sideload Rules: {@missingCount}" {
+                item "Add Sideload Denylist Ruleset":
+                    @page = "sideAdd"
+                item "Remove Sideload Denylist Ruleset":
+                    @page = "sideRemove"
+                item "Back":
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "sideStatus" {
+            @sideloadStatus = ""
+            repeat displayRequiredIndex for @requiredCount {
+                @displayRequiredItem = getListItem(@required, @displayRequiredIndex)
+                @displayRequired = "{@displayRequiredItem}"
+                @displayRequiredState = "NOT ADDED"
+                if @displayRequired == "ppq.apple.com" {
+                    @displayRequiredState = "{@sideloadPPQ}"
+                }
+                if @displayRequired == "ocsp2.apple.com" {
+                    @displayRequiredState = "{@sideloadOCSP2}"
+                }
+                if @displayRequired == "vpp.itunes.apple.com" {
+                    @displayRequiredState = "{@sideloadVPP}"
+                }
+                if @displayRequired == "valid.apple.com" {
+                    @displayRequiredState = "{@sideloadVALID}"
+                }
+                if @displayRequired == "ocsp.apple.com" {
+                    @displayRequiredState = "{@sideloadOCSP}"
+                }
+                if @displayRequired == "crl.apple.com" {
+                    @displayRequiredState = "{@sideloadCRL}"
+                }
+                if @displayRequired == "certs.apple.com" {
+                    @displayRequiredState = "{@sideloadCERTS}"
+                }
+                if @displayRequired == "appattest.apple.com" {
+                    @displayRequiredState = "{@sideloadAPPATTEST}"
+                }
+                if @displayRequiredState == "NOT ADDED" {
+                    @sideloadStatus += "NOT ADDED  |  {@displayRequired}\n"
+                } else {
+                    if @displayRequiredState == "ON" {
+                        @sideloadStatus += "ON  |  {@displayRequired}\n"
+                    } else {
+                        @sideloadStatus += "OFF  |  {@displayRequired}\n"
+                    }
+                }
+            }
+            @noticeTitle = "Check Sideloading Status"
+            @noticeText = "{@sideloadStatus}\nON = domain is blocked\nOFF = domain is not being blocked\nNOT ADDED = no rule for this domain"
+            @noticeParent = "status"
+            @page = "notice"
+        }
+        if @page == "sideAdd" {
+            @noticeIsAction = 1
+            if @denyOK == 0 {
+                @noticeTitle = "Unable to Load Rules"
+                @noticeText = "Your denylist couldn't be loaded. No changes were made.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+                @noticeParent = "sideload"
+                @page = "notice"
+            } else {
+                if @missingCount == 0 {
+                    @noticeTitle = "Everything Is Already Added"
+                    @noticeText = "All 8 sideloading rules are already in your denylist. No changes were made."
+                    @noticeParent = "sideload"
+                    @page = "notice"
+                } else {
+                    @intent = "add"
+                    @targetEndpoint = "{@denyEndpoint}"
+                    @targetDomains = @missingSideload
+                    @listName = "sideloading denylist"
+                    @confirmText = "Add {@missingCount} Missing Sideloading Rule(s)?\n\nAll missing rules will be added and switched ON. Existing rules will keep their current settings."
+                    @confirmLabel = "Add missing rules"
+                    @confirmParent = "sideload"
+                    @page = "confirm"
+                }
+            }
+        }
+        if @page == "sideRemove" {
+            @noticeIsAction = 1
+            if @denyOK == 0 {
+                @noticeTitle = "Unable to Load Rules"
+                @noticeText = "Your denylist couldn't be loaded. No changes were made.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+                @noticeParent = "sideload"
+                @page = "notice"
+            } else {
+                if @sideloadCount == 0 {
+                    @noticeTitle = "No Rules to Remove"
+                    @noticeText = "None of the 8 sideloading rules are currently in your denylist."
+                    @noticeParent = "sideload"
+                    @page = "notice"
+                } else {
+                    @selected = chooseFromList(@presentSideload, "Select Sideloading Rules to Remove", true, false)
+                    @selectedCount = count(@selected)
+                    if @selectedCount == 0 {
+                        @noticeTitle = "No Rules Selected"
+                        @noticeText = "Select at least one rule to remove."
+                        @noticeParent = "sideload"
+                        @page = "notice"
+                    } else {
+                        @intent = "remove"
+                        @targetEndpoint = "{@denyEndpoint}"
+                        @targetDomains = @selected
+                        @listName = "sideloading denylist"
+                        @confirmText = "Confirm Removal of {@selectedCount} Rule(s)?\n\nThe selected rules will be removed from your denylist. Other rules, including rules outside this sideloading set, will not be changed."
+                        @confirmLabel = "Remove rules"
+                        @confirmParent = "sideload"
+                        @page = "confirm"
+                    }
+                }
+            }
+        }
+
+        if @page == "custom" {
+            @noticeIsAction = 0
+            menu "Choose a List" {
+                item "Denylist":
+                    @customChoice = "deny"
+                    @page = "customOptions"
+                item "Allowlist":
+                    @customChoice = "allow"
+                    @page = "customOptions"
+                item "Back":
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "customOptions" {
+            @noticeIsAction = 0
+            @selectedList = "denylist"
+            @selectedSummaryLabel = "Enabled Denylist Rules"
+            @selectedRecords = @denyRecords
+            @selectedCount = count(@selectedRecords)
+            @selectedEnabled = @denyEnabled
+            @selectedOK = "{@denyOK}"
+            @targetEndpoint = "{@denyEndpoint}"
+            if @customChoice == "allow" {
+                @selectedList = "allowlist"
+                @selectedSummaryLabel = "Enabled Allowlist Rules"
+                @selectedRecords = @allowRecords
+                @selectedCount = count(@selectedRecords)
+                @selectedEnabled = @allowEnabled
+                @selectedOK = "{@allowOK}"
+                @targetEndpoint = "{@allowEndpoint}"
+            }
+            if @selectedOK == "0" {
+                @noticeTitle = "Connection Problem"
+                @noticeText = "Your {@selectedList} couldn't be loaded. No changes made.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+                @noticeParent = "custom"
+                @page = "notice"
+            } else {
+                menu "Manage {@selectedList} Rules\n\n{@selectedSummaryLabel}: {@selectedEnabled}/{@selectedCount}" {
+                    item "Add Rules":
+                        @page = "customAdd"
+                    item "Remove Rules":
+                        @page = "customRemove"
+                    item "Back":
+                        @page = "custom"
+                    item "Exit":
+                        stop()
+                }
+            }
+        }
+        if @page == "customAdd" {
+            @noticeIsAction = 1
+            @domainText = prompt("Add {@selectedList} Rules\n\nEnter the domain(s) you want to add, one per line.")
+            // i guess cherri requires an explicit newline separator here.
+            @lines = splitText(@domainText, "\n")
+            @lineCount = count(@lines)
+            @candidates = []
+            @invalid = ""
+            repeat enteredLineIndex for @lineCount {
+                @lineItem = getListItem(@lines, @enteredLineIndex)
+                @candidateRaw = "{@lineItem}"
+                @candidateTrim = trimWhitespace(@candidateRaw)
+                @candidate = lowercase(@candidateTrim)
+                if @candidate != "" {
+                    @matches = matchText('^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]*[a-z0-9])?$', @candidate)
+                    @matchCount = count(@matches)
+                    if @matchCount == 0 {
+                        @invalid += "{@candidate}\n"
+                    } else {
+                        @duplicate = 0
+                        @existingCandidateCount = count(@candidates)
+                        repeat candidateCheckIndex for @existingCandidateCount {
+                            @previousCandidate = getListItem(@candidates, @candidateCheckIndex)
+                            @previousText = "{@previousCandidate}"
+                            if @previousText == @candidate {
+                                @duplicate = 1
+                            }
+                        }
+                        if @duplicate == 0 {
+                            @candidates += @candidate
+                        }
+                    }
+                }
+            }
+            @candidateCount = count(@candidates)
+            if @invalid != "" {
+                @noticeText = "These domain names couldn't be accepted:\n\n{@invalid}\nCheck the spelling and try again. No changes were made."
+                @noticeTitle = "Check Domain Names"
+                @noticeParent = "customOptions"
+                @page = "notice"
+            } else {
+                if @candidateCount == 0 {
+                    @noticeText = "Enter at least one domain to continue."
+                    @noticeTitle = "No Domains Entered"
+                    @noticeParent = "customOptions"
+                    @page = "notice"
+                } else {
+                    @newDomains = []
+                    @newNames = ""
+                    repeat candidateRowIndex for @candidateCount {
+                        @candidateRecord = getListItem(@candidates, @candidateRowIndex)
+                        @requested = "{@candidateRecord}"
+                        @exists = 0
+                        repeat existingRowIndex for @selectedCount {
+                            @recordRepeatItem1 = getListItem(@selectedRecords, @existingRowIndex)
+                            @rec = getDictionary(@recordRepeatItem1)
+                            @rid = getValue(@rec, "id")
+                            @name = "{@rid}"
+                            if @name == @requested {
+                                @exists = 1
+                            }
+                        }
+                        if @exists == 0 {
+                            @newDomains += @requested
+                            @newNames += "{@requested}\n"
+                        }
+                    }
+                    @newCount = count(@newDomains)
+                    if @newCount == 0 {
+                        @noticeText = "All the domains you entered already have rules in your {@selectedList}. No changes made."
+                        @noticeTitle = "Domains Already Added"
+                        @noticeParent = "customOptions"
+                        @page = "notice"
+                    } else {
+                        @intent = "add"
+                        @targetDomains = @newDomains
+                        @listName = @selectedList
+                        @confirmText = "Add these {@newCount} New {@selectedList} Rule(s)?\n\n{@newNames}\nNew rules will be switched ON. Rules already in your list won't be touched."
+                        @confirmLabel = "Add rules"
+                        @confirmParent = "customOptions"
+                        @page = "confirm"
+                    }
+                }
+            }
+        }
+        if @page == "customRemove" {
+            @noticeIsAction = 1
+            if @selectedCount == 0 {
+                @noticeText = "There are no rules in your {@selectedList} to remove."
+                @noticeTitle = "No Rules to Remove"
+                @noticeParent = "customOptions"
+                @page = "notice"
+            } else {
+                @choiceLabels = []
+                repeat choiceRowIndex for @selectedCount {
+                    @recordRepeatItem2 = getListItem(@selectedRecords, @choiceRowIndex)
+                    @rec = getDictionary(@recordRepeatItem2)
+                    @rid = getValue(@rec, "id")
+                    @domain = "{@rid}"
+                    @active = getValue(@rec, "active")
+                    @activeText = "{@active}"
+                    @label = "OFF  |  {@domain}"
+                    if @activeText == "Yes" || @activeText == "true" || @activeText == "True" || @activeText == "1" {
+                        @label = "ON  |  {@domain}"
+                    }
+                    @choiceLabels += @label
+                }
+                @chosen = chooseFromList(@choiceLabels, "Select {@selectedList} Rules to Remove", true, false)
+                @chosenCount = count(@chosen)
+                if @chosenCount == 0 {
+                    @noticeText = "Select at least one rule to remove."
+                    @noticeTitle = "No Rules Selected"
+                    @noticeParent = "customOptions"
+                    @page = "notice"
+                } else {
+                    @targetDomains = []
+                    @names = ""
+                    repeat chosenRowIndex for @chosenCount {
+                        @chosenLabel = getListItem(@chosen, @chosenRowIndex)
+                        @chosenText = "{@chosenLabel}"
+                        @parts = splitText(@chosenText, "  |  ")
+                        @part = getLastItem(@parts)
+                        @name = "{@part}"
+                        if @name != "" {
+                            @targetDomains += @name
+                            @names += "{@name}\n"
+                        }
+                    }
+                    @intent = "remove"
+                    @listName = @selectedList
+                    @confirmText = "Confirm Removal of these {@chosenCount} Rule(s)?\n\n{@names}\nThese rules will be removed from your {@selectedList}. All other rules will remain unchanged."
+                    @confirmLabel = "Remove rules"
+                    @confirmParent = "customOptions"
+                    @page = "confirm"
+                }
+            }
+        }
+        if @page == "confirm" {
+            @confirmMenuText = "{@confirmText}"
+            @confirmDomainCount = count(@targetDomains)
+            if @confirmParent == "customOptions" && @confirmDomainCount > 2 {
+                show(@confirmText)
+                @confirmMenuText = "Confirm {@confirmDomainCount} {@listName} rule(s)?"
+            }
+            menu @confirmMenuText {
+                item @confirmLabel:
+                    @page = "working"
+                item "Back":
+                    @intent = ""
+                    @page = "{@confirmParent}"
+                item "Exit":
+                    stop()
+            }
+        }
+
+        if @page == "working" {
+            @noticeIsAction = 1
+            if @intent != "" {
+                @selectedEndpoint = "{@targetEndpoint}"
+                @selectedReadEndpoint = "{@selectedEndpoint}"
+                // read the full rule list again before making changes
+                @loadResponse = downloadURL(@selectedReadEndpoint, {"X-Api-Key": "{@apiKey}"})
+                @loadDict = getDictionary(@loadResponse)
+                @loadKeys = getKeys(@loadDict)
+                @loadKeysText = "{@loadKeys}"
+                @loadRecords = []
+                @loadOK = 0
+                if @loadKeysText contains "data" {
+                    @loadRecords = getValue(@loadDict, "data")
+                    @loadOK = 1
+                }
+                // refuse to edit a partial paginated list.
+                @loadMore = 0
+                if @loadKeysText contains "meta" {
+                    @loadMeta = getValue(@loadDict, "meta")
+                    @loadMetaDict = getDictionary(@loadMeta)
+                    @loadMetaKeys = getKeys(@loadMetaDict)
+                    @loadMetaKeysText = "{@loadMetaKeys}"
+                    if @loadMetaKeysText contains "pagination" {
+                        @loadPagination = getValue(@loadMetaDict, "pagination")
+                        @loadPaginationDict = getDictionary(@loadPagination)
+                        @loadCursor = getValue(@loadPaginationDict, "cursor")
+                        @loadCursorText = "{@loadCursor}"
+                        if @loadCursorText != "" && @loadCursorText != "null" && @loadCursorText != "None" && @loadCursorText != "Nothing" && @loadCursorText != "nil" {
+                            @loadMore = 1
+                        }
+                    }
+                }
+                if @loadMore == 1 {
+                    @wholeProfileResponse = downloadURL("https://api.nextdns.io/profiles/{@profileId}", {"X-Api-Key": "{@apiKey}"})
+                    @wholeProfileDict = getDictionary(@wholeProfileResponse)
+                    @wholeProfileKeys = getKeys(@wholeProfileDict)
+                    @wholeProfileKeysText = "{@wholeProfileKeys}"
+                    if @wholeProfileKeysText contains "data" {
+                        @wholeData = getValue(@wholeProfileDict, "data")
+                        @wholeDataDict = getDictionary(@wholeData)
+                        @wholeKeys = getKeys(@wholeDataDict)
+                        @wholeKeysText = "{@wholeKeys}"
+                        @loadOK = 0
+                        if @selectedEndpoint == @denyEndpoint && @wholeKeysText contains "denylist" {
+                            @loadRecords = getValue(@wholeDataDict, "denylist")
+                            @loadOK = 1
+                        }
+                        if @selectedEndpoint == @allowEndpoint && @wholeKeysText contains "allowlist" {
+                            @loadRecords = getValue(@wholeDataDict, "allowlist")
+                            @loadOK = 1
+                        }
+                    } else {
+                        @loadOK = 0
+                    }
+                }
+                @preCount = count(@loadRecords)
+                @readableCount = 0
+                repeat preflightRowIndex for @preCount {
+                    @recordBefore = getListItem(@loadRecords, @preflightRowIndex)
+                    @rec = getDictionary(@recordBefore)
+                    @rid = getValue(@rec, "id")
+                    @name = "{@rid}"
+                    @entryActive = getValue(@rec, "active")
+                    @entryActiveText = "{@entryActive}"
+                    @knownActive = 0
+                    if @entryActiveText == "Yes" || @entryActiveText == "No" || @entryActiveText == "true" || @entryActiveText == "false" || @entryActiveText == "True" || @entryActiveText == "False" || @entryActiveText == "1" || @entryActiveText == "0" {
+                        @knownActive = 1
+                    }
+                    if @name != "" && @knownActive == 1 {
+                        @readableCount += 1
+                    }
+                }
+                if @readableCount != @preCount {
+                    @loadOK = 0
+                }
+                if @selectedEndpoint == @denyEndpoint && @denyCount > 0 && @preCount == 0 {
+                    @loadOK = 0
+                }
+                if @selectedEndpoint == @allowEndpoint && @allowCount > 0 && @preCount == 0 {
+                    @loadOK = 0
+                }
+                if @loadOK == 0 {
+                    @noticeText = "Your {@listName} couldn't be loaded. No changes were made.\n\nTry checking your NextDNS account, your API key and Profile ID in the first two text fields of this shortcut's actions, or if your device is connected to the internet, then try again. "
+                    @noticeTitle = "Connection Problem"
+                    @noticeParent = "{@confirmParent}"
+                    @page = "notice"
+                } else {
+                    @changes = []
+                    @missingToggle = 0
+                    @targetCount = count(@targetDomains)
+                    @invalidTargets = 0
+                    repeat targetRowIndex for @targetCount {
+                        @targetItem = getListItem(@targetDomains, @targetRowIndex)
+                        @requested = "{@targetItem}"
+                        if @requested == "" {
+                            @invalidTargets += 1
+                        }
+                        @exists = 0
+                        @currentActive = ""
+                        repeat compareRowIndex for @preCount {
+                            @recordRepeatItem3 = getListItem(@loadRecords, @compareRowIndex)
+                            @rec = getDictionary(@recordRepeatItem3)
+                            @rid = getValue(@rec, "id")
+                            @name = "{@rid}"
+                            if @name == @requested {
+                                @exists = 1
+                                @active = getValue(@rec, "active")
+                                @activeValueText = "{@active}"
+                                @currentActive = "No"
+                                if @activeValueText == "Yes" || @activeValueText == "true" || @activeValueText == "True" || @activeValueText == "1" {
+                                    @currentActive = "Yes"
+                                }
+                            }
+                        }
+                        if @intent == "add" && @exists == 0 {
+                            @changes += @requested
+                        }
+                        if @intent == "remove" && @exists == 1 {
+                            @changes += @requested
+                        }
+                        if @intent == "toggle" {
+                            if @exists == 0 {
+                                @missingToggle = 1
+                            } else {
+                                if @currentActive != @expectedActive {
+                                    @changes += @requested
+                                }
+                            }
+                        }
+                    }
+                    @changedCount = count(@changes)
+                    if @targetCount == 0 || @invalidTargets > 0 {
+                        @noticeText = "Selected domains couldn't be read. No changes were made. Return to the list and try again."
+                        @noticeTitle = "Couldn't Read Selection"
+                        @noticeParent = "{@confirmParent}"
+                        @page = "notice"
+                    } else {
+                    if @missingToggle == 1 {
+                        @noticeText = "The ppq.apple.com rule hasn't been added yet. No changes were made."
+                        @noticeTitle = "PPQ Rule Not Found"
+                        @noticeParent = "{@confirmParent}"
+                        @page = "notice"
+                    } else {
+                        if @changedCount == 0 {
+                            @noticeText = "These rules are already present in this way. No changes were made."
+                            @noticeTitle = "No Changes Needed"
+                            @noticeParent = "{@confirmParent}"
+                            @page = "notice"
+                        } else {
+                            repeat changeRowIndex for @changedCount {
+                                @changeItem = getListItem(@changes, @changeRowIndex)
+                                @requested = "{@changeItem}"
+                                @itemEndpoint = "{@selectedEndpoint}/{@requested}"
+                                if @intent == "add" {
+                                    @posted = jsonRequest(@selectedEndpoint, "POST", {"id": "{@requested}", "active": true}, {"X-Api-Key": "{@apiKey}"})
+                                }
+                                if @intent == "remove" {
+                                    @deleted = jsonRequest(@itemEndpoint, "DELETE", {}, {"X-Api-Key": "{@apiKey}"})
+                                }
+                                if @intent == "toggle" {
+                                    if @expectedActive == "Yes" {
+                                        @patched = jsonRequest(@itemEndpoint, "PATCH", {"active": true}, {"X-Api-Key": "{@apiKey}"})
+                                    } else {
+                                        @patched = jsonRequest(@itemEndpoint, "PATCH", {"active": false}, {"X-Api-Key": "{@apiKey}"})
+                                    }
+                                }
+                            }
+                            // verify changes against a fresh API response
+                            @loadResponse = downloadURL(@selectedReadEndpoint, {"X-Api-Key": "{@apiKey}"})
+                            @loadDict = getDictionary(@loadResponse)
+                            @loadKeys = getKeys(@loadDict)
+                            @loadKeysText = "{@loadKeys}"
+                            @loadRecords = []
+                            @loadOK = 0
+                            if @loadKeysText contains "data" {
+                                @loadRecords = getValue(@loadDict, "data")
+                                @loadOK = 1
+                            }
+                            // dont verify changes using partial results
+                            @loadMore = 0
+                            if @loadKeysText contains "meta" {
+                                @loadMeta = getValue(@loadDict, "meta")
+                                @loadMetaDict = getDictionary(@loadMeta)
+                                @loadMetaKeys = getKeys(@loadMetaDict)
+                                @loadMetaKeysText = "{@loadMetaKeys}"
+                                if @loadMetaKeysText contains "pagination" {
+                                    @loadPagination = getValue(@loadMetaDict, "pagination")
+                                    @loadPaginationDict = getDictionary(@loadPagination)
+                                    @loadCursor = getValue(@loadPaginationDict, "cursor")
+                                    @loadCursorText = "{@loadCursor}"
+                                    if @loadCursorText != "" && @loadCursorText != "null" && @loadCursorText != "None" && @loadCursorText != "Nothing" && @loadCursorText != "nil" {
+                                        @loadMore = 1
+                                    }
+                                }
+                            }
+                            if @loadMore == 1 {
+                                @wholeProfileResponse = downloadURL("https://api.nextdns.io/profiles/{@profileId}", {"X-Api-Key": "{@apiKey}"})
+                                @wholeProfileDict = getDictionary(@wholeProfileResponse)
+                                @wholeProfileKeys = getKeys(@wholeProfileDict)
+                                @wholeProfileKeysText = "{@wholeProfileKeys}"
+                                if @wholeProfileKeysText contains "data" {
+                                    @wholeData = getValue(@wholeProfileDict, "data")
+                                    @wholeDataDict = getDictionary(@wholeData)
+                                    @wholeKeys = getKeys(@wholeDataDict)
+                                    @wholeKeysText = "{@wholeKeys}"
+                                    @loadOK = 0
+                                    if @selectedEndpoint == @denyEndpoint && @wholeKeysText contains "denylist" {
+                                        @loadRecords = getValue(@wholeDataDict, "denylist")
+                                        @loadOK = 1
+                                    }
+                                    if @selectedEndpoint == @allowEndpoint && @wholeKeysText contains "allowlist" {
+                                        @loadRecords = getValue(@wholeDataDict, "allowlist")
+                                        @loadOK = 1
+                                    }
+                                } else {
+                                    @loadOK = 0
+                                }
+                            }
+                            @postCount = count(@loadRecords)
+                            @readableCount = 0
+                            repeat verifyRowIndex for @postCount {
+                                @recordAfter = getListItem(@loadRecords, @verifyRowIndex)
+                                @rec = getDictionary(@recordAfter)
+                                @rid = getValue(@rec, "id")
+                                @name = "{@rid}"
+                                @entryActive = getValue(@rec, "active")
+                                @entryActiveText = "{@entryActive}"
+                                @knownActive = 0
+                                if @entryActiveText == "Yes" || @entryActiveText == "No" || @entryActiveText == "true" || @entryActiveText == "false" || @entryActiveText == "True" || @entryActiveText == "False" || @entryActiveText == "1" || @entryActiveText == "0" {
+                                    @knownActive = 1
+                                }
+                                if @name != "" && @knownActive == 1 {
+                                    @readableCount += 1
+                                }
+                            }
+                            if @readableCount != @postCount {
+                                @loadOK = 0
+                            }
+                            if @loadOK == 0 {
+                                @noticeText = "NextDNS couldn't be checked after the request. Some changes may have been saved. Open your {@listName} in NextDNS to confirm them."
+                                @noticeTitle = "Couldn't Verify Changes"
+                                @noticeParent = "{@confirmParent}"
+                                @page = "notice"
+                            } else {
+                                @unconfirmed = ""
+                                @unconfirmedCount = 0
+                                repeat verifiedChangeIndex for @changedCount {
+                                    @verifyChangeItem = getListItem(@changes, @verifiedChangeIndex)
+                                    @requested = "{@verifyChangeItem}"
+                                    @exists = 0
+                                    @activeFinal = ""
+                                    repeat finalRowIndex for @postCount {
+                                        @recordRepeatItem4 = getListItem(@loadRecords, @finalRowIndex)
+                                        @rec = getDictionary(@recordRepeatItem4)
+                                        @rid = getValue(@rec, "id")
+                                        @name = "{@rid}"
+                                        if @name == @requested {
+                                            @exists = 1
+                                            @active = getValue(@rec, "active")
+                                            @activeValueText = "{@active}"
+                                            @activeFinal = "No"
+                                            if @activeValueText == "Yes" || @activeValueText == "true" || @activeValueText == "True" || @activeValueText == "1" {
+                                                @activeFinal = "Yes"
+                                            }
+                                        }
+                                    }
+                                    @confirmed = 0
+                                    if @intent == "remove" && @exists == 0 {
+                                        @confirmed = 1
+                                    }
+                                    if @intent == "add" && @exists == 1 && @activeFinal == "Yes" {
+                                        @confirmed = 1
+                                    }
+                                    if @intent == "toggle" && @exists == 1 && @activeFinal == @expectedActive {
+                                        @confirmed = 1
+                                    }
+                                    if @confirmed == 0 {
+                                        @unconfirmedCount += 1
+                                        @unconfirmed += "{@requested}\n"
+                                    }
+                                }
+                                if @unconfirmedCount == 0 {
+                                    @resultText = "{@changedCount} {@listName} rule(s) added"
+                                    if @intent == "remove" {
+                                        @resultText = "{@changedCount} {@listName} rule(s) removed"
+                                    }
+                                    if @intent == "toggle" {
+                                        @resultText = @ppqResult
+                                    }
+
+                                    wait(@prefsWaitSeconds)
+                                    setWifi(false)
+                                    setCellularData(false)
+                                    wait(@prefsWaitSeconds)
+                                    setWifi(true)
+                                    if @prefsCellular == 1 {
+                                        setCellularData(true)
+                                    }
+                                    if @prefsSuccess == 1 {
+                                        @successTitle = "Changes Completed"
+                                        @successMessage = "{@resultText}\n\nNetwork connection has refreshed."
+                                        @successParent = "{@confirmParent}"
+                                        @page = "success"
+                                    } else {
+                                        stop()
+                                    }
+                                } else {
+                                    @noticeText = "Some requested changes couldn't be confirmed:\n\n{@unconfirmed}\nCheck your {@listName} in NextDNS. Your network connections were not refreshed."
+                                    @noticeTitle = "Check Your Rules"
+                                    @noticeParent = "{@confirmParent}"
+                                    @page = "notice"
+                                }
+                            }
+                        }
+                    }
+                    }
+                }
+            }
+        }
+
+        if @page == "notice" {
+            @noticeFull = "{@noticeTitle}\n\n{@noticeText}"
+            if @noticeIsAction == 1 {
+                if @noticeTitle == "Check Domain Names" || @noticeTitle == "Check Your Rules" {
+                    show(@noticeFull)
+                    @needsReload = 1
+                    @page = "{@noticeParent}"
+                } else {
+                    @noticeMenuText = "{@noticeFull}"
+                    if @noticeTitle == "Unable to Load Rules" || @noticeTitle == "Connection Problem" {
+                        show(@noticeFull)
+                        @noticeMenuText = "{@noticeTitle}"
+                    }
+                    menu @noticeMenuText {
+                        item "Back":
+                            @needsReload = 1
+                            @page = "{@noticeParent}"
+                        item "Main Menu":
+                            @needsReload = 1
+                            @page = "main"
+                        item "Exit":
+                            stop()
+                    }
+                }
+            } else {
+                if @noticeParent == "status" || @noticeParent == "infoSetup" {
+                    show(@noticeFull)
+                    @page = "{@noticeParent}"
+                } else {
+                    @readOnlyNoticeMenu = "{@noticeFull}"
+                    if @noticeTitle == "Connection Problem" {
+                        show(@noticeFull)
+                        @readOnlyNoticeMenu = "{@noticeTitle}"
+                    }
+                    menu @readOnlyNoticeMenu {
+                        item "Back":
+                            @page = "{@noticeParent}"
+                        item "Exit":
+                            stop()
+                    }
+                }
+            }
+        }
+
+        if @page == "success" {
+            menu "{@successTitle}\n\n{@successMessage}" {
+                item "Back":
+                    @needsReload = 1
+                    @page = "{@successParent}"
+                item "Main Menu":
+                    @needsReload = 1
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+        }
+
+        if @page == "refresh" {
+            @doRefresh = 0
+            @refreshFinish = "wifi on."
+            if @prefsCellular == 1 {
+                @refreshFinish = "wifi & cellular data on."
+            }
+            show("Refresh Network Connection\n\nOnce you tap 'Refresh Now', the shortcut will wait {@prefsWaitSeconds} seconds, turn off Wi-Fi & cellular data, wait another {@prefsWaitSeconds} seconds, then turn {@refreshFinish}\n\nKeep the shortcut running until it finishes.")
+            menu "Refresh Network Connection" {
+                item "Refresh Now":
+                    @doRefresh = 1
+                item "Back":
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+            if @doRefresh == 1 {
+                wait(@prefsWaitSeconds)
+                setWifi(false)
+                setCellularData(false)
+                wait(@prefsWaitSeconds)
+                setWifi(true)
+                if @prefsCellular == 1 {
+                    setCellularData(true)
+                }
+                if @prefsSuccess == 1 {
+                    @successTitle = "Refresh Completed"
+                    @successMessage = "Network connection refreshed successfully."
+                    @successParent = "refresh"
+                    @page = "success"
+                } else {
+                    stop()
+                }
+            }
+        }
+
+        // save each preference change at the start of the next screen cycle
+        if @page == "prefs" {
+            menu "Change Preferences" {
+                item "View Current Settings":
+                    @page = "prefsView"
+                item "Network Refresh":
+                    @page = "prefsRefresh"
+                item "Sideloading Features":
+                    @page = "prefsSideload"
+                item "Success Confirmations":
+                    @page = "prefsSuccess"
+                item "Extra 'Open NextDNS App'":
+                    @page = "prefsApp"
+                item "Reset Preferences":
+                    @page = "prefsReset"
+                item "Back":
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsView" {
+            @currentSuccess = "Hide"
+            if @prefsSuccess == 1 {
+                @currentSuccess = "Show"
+            }
+            @currentSideload = "Hide"
+            if @prefsSideload == 1 {
+                @currentSideload = "Show"
+            }
+            @currentApp = "Hide"
+            if @prefsApp == 1 {
+                @currentApp = "Show"
+            }
+            @currentNetwork = "Wifi only"
+            if @prefsCellular == 1 {
+                @currentNetwork = "Wifi & Cellular"
+            }
+            show("Current Preferences\n\nNetwork Refresh\nWait Time Interval: {@prefsWaitSeconds} seconds\nNetwork Re-Enables: {@currentNetwork}\n\nSideloading Features: {@currentSideload}\nSuccess Confirmations: {@currentSuccess}\nOpen NextDNS App: {@currentApp}")
+            @page = "prefs"
+        }
+        if @page == "prefsRefresh" {
+            menu "Network Refresh Preferences" {
+                item "Wait Time Interval":
+                    @page = "prefsWait"
+                item "Network Re-Enables":
+                    @page = "prefsNetworkMode"
+                item "Back":
+                    @page = "prefs"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsWait" {
+            @waitSelection = 0
+            show("Wait Time Interval\n\nCurrent: {@prefsWaitSeconds} seconds\nDefault: 5 seconds\n\nHow long the shortcut should wait after changing something on NextDNS before turning off wifi & cellular and again before enabling the connection(s). ")
+            menu "Wait Time Interval" {
+                item "3 Seconds":
+                    @waitSelection = 3
+                item "5 Seconds":
+                    @waitSelection = 5
+                item "8 Seconds":
+                    @waitSelection = 8
+                item "10 Seconds":
+                    @waitSelection = 10
+                item "15 Seconds":
+                    @waitSelection = 15
+                item "Custom Interval":
+                    @waitEnteredRaw = prompt("Enter the refresh wait interval in seconds (2–30).", "Number", "{@prefsWaitSeconds}")
+                    @waitEnteredText = "{@waitEnteredRaw}"
+                    @waitEnteredMatches = matchText('^[0-9]+$', @waitEnteredText)
+                    @waitEnteredMatchCount = count(@waitEnteredMatches)
+                    if @waitEnteredMatchCount == 0 {
+                        alert("Please enter a whole number between 2 and 30 seconds.", "Invalid Number")
+                    } else {
+                        @waitCandidate = number(@waitEnteredText)
+                        if @waitCandidate < 2 || @waitCandidate > 30 {
+                            alert("Please enter a whole number between 2 and 30 seconds.", "Invalid Number")
+                        } else {
+                            @waitSelection = @waitCandidate
+                        }
+                    }
+                item "Back":
+                    @page = "prefsRefresh"
+                item "Exit":
+                    stop()
+            }
+            if @waitSelection > 0 {
+                @prefsWaitSeconds = @waitSelection
+                @prefsDirty = 1
+                @page = "prefsRefresh"
+            }
+        }
+        if @page == "prefsNetworkMode" {
+            @networkNow = "Enable WiFi only"
+            if @prefsCellular == 1 {
+                @networkNow = "Enable WiFi & Cellular"
+            }
+            show("Network Re-Enables\n\nCurrent: {@networkNow}\nDefault: Enable Wifi only\n\nChoose which connections should be enabled after wifi & cellular get disabled during a network refresh. Both wifi and cellular data will still be turned OFF intially during refresh. \n\nCurrently there is no way for shortcuts to detect what was on previously to restore by, so it has to be a set decision.  ")
+            menu "Network Re-Enables" {
+                item "Enable WiFi only":
+                    @prefsCellular = 0
+                    @prefsDirty = 1
+                    @page = "prefsRefresh"
+                item "Enable WiFi & Cellular":
+                    @prefsCellular = 1
+                    @prefsDirty = 1
+                    @page = "prefsRefresh"
+                item "Back":
+                    @page = "prefsRefresh"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsSideload" {
+            @sideloadNow = "Hide"
+            if @prefsSideload == 1 {
+                @sideloadNow = "Show"
+            }
+            show("Sideloading Features\n\nCurrent: {@sideloadNow}\nDefault: Show\n\nControls whether all sideloading-related options appear on this shortcut. Hiding them will not change anything on NextDNS.")
+            menu "Sideloading Features" {
+                item "Show":
+                    @prefsSideload = 1
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Hide":
+                    @prefsSideload = 0
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Back":
+                    @page = "prefs"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsSuccess" {
+            @successNow = "Hide"
+            if @prefsSuccess == 1 {
+                @successNow = "Show"
+            }
+            show("Success Confirmations\n\nCurrent: {@successNow}\nDefault: Hide\n\nWhether to show confirmation alerts after actions succeeded. Errors and warnings will still be shown regardless.")
+            menu "Success Confirmations" {
+                item "Show":
+                    @prefsSuccess = 1
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Skip":
+                    @prefsSuccess = 0
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Back":
+                    @page = "prefs"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsApp" {
+            @appNow = "Hide"
+            if @prefsApp == 1 {
+                @appNow = "Show"
+            }
+            show("Extra 'Open NextDNS App' Option\n\nCurrently: {@appNow}\nDefault: Hide\n\nAdds a 'Open NextDNS App' option below 'Open NextDNS Website' on the main menu. The official NextDNS iOS app must be installed.")
+            menu "Extra 'Open NextDNS App' Option" {
+                item "Show":
+                    @prefsApp = 1
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Hide":
+                    @prefsApp = 0
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Back":
+                    @page = "prefs"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "prefsReset" {
+            menu "Reset Preferences\n\nRestore all preferences to their defaults?\n\nThis will only change this shortcut and won't make any changes on NextDNS." {
+                item "Reset to Defaults":
+                    @prefsSuccess = 0
+                    @prefsWaitSeconds = 5
+                    @prefsCellular = 0
+                    @prefsSideload = 1
+                    @prefsApp = 0
+                    @prefsDirty = 1
+                    @page = "prefs"
+                item "Cancel":
+                    @page = "prefs"
+            }
+        }
+
+        if @page == "info" {
+            menu "NextDNS Management - Info" {
+                item "How to Setup":
+                    @page = "infoSetup"
+                item "Main Features":
+                    @page = "infoControls"
+                item "Connection Refresh":
+                    @page = "infoNetwork"
+                item "GitHub Repo":
+                    @page = "infoGitHub"
+                item "Back":
+                    @page = "main"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "infoSetup" {
+            @noticeIsAction = 0
+            menu "How to Setup" {
+                item "Connect NextDNS Account":
+                    @noticeTitle = "Connect NextDNS Account to This Shortcut"
+                    @noticeText = "1. Create or sign into your NextDNS account on their website go to 'Account' page, scroll down and copy your API key\n\n2. Open the actions of this shortcut, in the first text field replace \"PASTE_API_KEY_HERE\" with your API key \n\n3. Get your NextDNS Profile ID in the 'Setup' tab under 'Endpoints'  it's 6 characters long and should look something like \"de6b41\"\n\n4. In the section text field of this shortcut's actions, replace \"PASTE_PROFILE_ID_HERE\" with your Profile ID\n\n5. Run this shortcut again\n\nDO NOT share your install of this shortcut after you've done this, or others will receive your API key with it. "
+                    @noticeParent = "infoSetup"
+                    @page = "notice"
+                item "Installing NextDNS Profile":
+                    @noticeTitle = "Install Your NextDNS Profile to Settings"
+                    @noticeText = "1. Use the 'Open NextDNS Website' button below\n\n2. Create or sign into your account\n\n3. In the NextDNS 'Setup' tab\n\n4. Select 'Use our Apple Configuration Profile' Generator available at apple.nextdns.io'\n\n5. Install the DNS profile to your device's Settings app.\n\nYou will find it at 'Settings > General > VPN, DNS, & Device Management', you can also use the 'Open DNS in Settings' button on main menu whenever you like. "
+                    @noticeParent = "infoSetup"
+                    @page = "notice"
+                item "Back":
+                    @page = "info"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "infoControls" {
+            @controlsText = "Main Features\n\nCheck Status: \nSee denylist and allowlist rules, privacy blocklists, privacy & security protections, and DNS analytics.\n\nAdd/Remove Custom DNS Rules: \nAdd/remove allowlist or denylist entries."
+            if @prefsSideload == 1 {
+                @controlsText += "\n\nSwap PPQ Blocking On/off:  \nTurn the 'ppq.apple.com' denylist rule off or back on before and after sideloaded app installs.\nTurn the block off temporarily when doing sideload installs, otherwise always keep it on.\n\nAdd/remove Sideloading Denylist Rules:  \nAdds all 8 sideloading rules if any are missing, or select any of them to remove. "
+            }
+            @controlsText += "\n\nChange Preferences: \nConfigure confirmation messages, refresh behavior, and available menu options."
+            show(@controlsText)
+            @page = "info"
+        }
+        if @page == "infoNetwork" {
+            @networkInfoFinish = "wifi on."
+            if @prefsCellular == 1 {
+                @networkInfoFinish = "wifi & cellular data on."
+            }
+            menu "Refresh Network Connection\n\nAfter a verified NextDNS change is made, the shortcut will wait {@prefsWaitSeconds} seconds, turn off Wi-Fi & cellular data, wait another {@prefsWaitSeconds} seconds, then turn {@networkInfoFinish}\n\nKeep the shortcut running until it finishes." {
+                item "Back":
+                    @page = "info"
+                item "Exit":
+                    stop()
+            }
+        }
+        if @page == "infoGitHub" {
+            menu "Created by landnthrn\n\nIf this shortcut was helpful, \nplease give the repo a star on GitHub!! \n\nI would appreciate it a lot :)" {
+                item "Open Repo":
+                    openURL("https://github.com/landnthrn/nextdns-manager-ios-shortcut")
+                    stop()
+                item "Back":
+                    @page = "info"
+                item "Exit":
+                    stop()
+            }
+        }
+    }
+}
