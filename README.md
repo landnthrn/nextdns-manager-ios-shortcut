@@ -63,7 +63,7 @@ An iOS Shortcut for managing and checking your NextDNS profile without needing t
 
 ## Setup
 
-1. [Download the shortcut](https://www.icloud.com/shortcuts/37d18e93b87c4fa4ac8701991b245ac7) directly with iCloud, the `.shortcut` is also provided in this repo
+1. [Download the shortcut](https://www.icloud.com/shortcuts/5d8cf8074454426ea226fbd5cca22551) directly with iCloud, the `.shortcut` is also provided in this repo
 2. Open the shortcut's actions in the Apple Shortcuts app
 3. In the first two text fields, replace `PASTE_API_KEY_HERE` and `PASTE_PROFILE_ID_HERE` with your NextDNS API key and Profile ID
    - Copy your API key from the [NextDNS website](https://my.nextdns.io/), when signed in go to Account page and scroll down. 
