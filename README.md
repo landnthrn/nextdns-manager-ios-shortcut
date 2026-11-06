@@ -2,6 +2,9 @@
 
 An iOS Shortcut for managing and checking your NextDNS profile without needing to visit the NextDNS website or app. Includes sideloading features such as auto-setup of the famous sideloading ruleset, and easy PPQ block toggling. 
 
+The shortcut only uses native Shortcuts actions, no external app actions needed!  
+Should be compatible with iOS 18+, though so far only tested on iOS 26.
+
 ## Previews
 
 <table align="center">
